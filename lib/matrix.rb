@@ -35,6 +35,16 @@ module ExceptionForMatrix # :nodoc:
     end
   end
 
+  class ErrNotPositiveDefinite < StandardError
+    def initialize(val = nil)
+      if val
+        super(val)
+      else
+        super("Matrix is not positive definite")
+      end
+    end
+  end
+
   class ErrOperationNotDefined < StandardError
     def initialize(vals)
       if vals.is_a?(Array)
@@ -62,6 +72,7 @@ class Matrix
   include Enumerable
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
+  autoload :GeneralizedEigenvalueDecomposition, "matrix/generalized_eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
 
   # instance creations
@@ -1553,6 +1564,21 @@ class Matrix
     EigenvalueDecomposition.new(self)
   end
   alias_method :eigen, :eigensystem
+
+  #
+  # Returns the generalized eigensystem for +A v = lambda B v+; see
+  # +GeneralizedEigenvalueDecomposition+. +A+ must be real symmetric and +B+
+  # must be real symmetric positive definite. Eigenvectors are normalized with
+  # the +B+ inner product, so +V.transpose * B * V+ is the identity matrix.
+  #
+  #   v, d, v_inv = a.generalized_eigensystem(b)
+  #   v.transpose * b * v # => Matrix[[1, 0], [0, 1]]
+  #
+  def generalized_eigensystem(b)
+    GeneralizedEigenvalueDecomposition.new(self, b)
+  end
+  alias_method :generalized_eigen, :generalized_eigensystem
+  alias_method :generalized_eigenvalue_decomposition, :generalized_eigensystem
 
   #
   # Returns the LUP decomposition of the matrix; see +LUPDecomposition+.

@@ -787,6 +787,151 @@ class TestMatrix < Test::Unit::TestCase
     assert_in_epsilon(vectors[1][0], vectors[1][1])
   end
 
+  def test_generalized_eigensystem_with_identity_matches_eigensystem
+    a = Matrix[[4, 1, -2], [1, 2, 0], [-2, 0, 3]]
+    b = Matrix.identity(3)
+    ordinary = a.eigensystem
+    generalized = a.generalized_eigensystem(b)
+
+    assert_equal ordinary.eigenvalues, generalized.eigenvalues
+    assert_equal ordinary.v, generalized.v
+    assert_equal ordinary.d, generalized.d
+    inverse_product = generalized.v_inv * generalized.v
+    inverse_product.each_with_index do |entry, i, j|
+      assert_in_delta(i == j ? 1 : 0, entry, 1e-14)
+    end
+
+    mass = generalized.v.transpose * b * generalized.v
+    mass.each(:off_diagonal) {|entry| assert_in_delta 0, entry, 1e-14}
+    mass.each(:diagonal) {|entry| assert_in_delta 1, entry, 1e-14}
+  end
+
+  def test_generalized_eigensystem_scaled_b_and_offdiagonal_a
+    a = Matrix[[2, 1], [1, 2]]
+    b = Matrix[[4, 0], [0, 1]]
+    generalized = a.generalized_eigensystem(b)
+    expected_values = [(5 - Math.sqrt(13)) / 4, (5 + Math.sqrt(13)) / 4]
+
+    generalized.eigenvalues.each_with_index do |value, i|
+      assert_in_delta expected_values[i], value, 1e-14
+    end
+
+    generalized.eigenvectors.each do |vector|
+      assert_in_delta 1, vector.inner_product(b * vector), 1e-14
+    end
+
+    mass = generalized.v.transpose * b * generalized.v - Matrix.identity(2)
+    assert_operator Math.sqrt(mass.inject(0.0) {|sum, entry| sum + entry.abs2 }), :<, 1e-14
+    assert_operator generalized.residuals[:max_residual_norm], :<, 1e-14
+    assert_operator generalized.residuals[:max_relative_residual], :<, 1e-14
+    assert_in_delta 4, generalized.residuals[:b_condition_number], 1e-12
+  end
+
+  def test_generalized_eigensystem_repeated_eigenvalues
+    b = Matrix[[4, 1, 0], [1, 3, 1], [0, 1, 2]]
+    a = 5 * b
+    generalized = a.generalized_eigensystem(b)
+
+    generalized.eigenvalues.each {|value| assert_in_delta 5.0, value, 1e-13 }
+    mass = generalized.v.transpose * b * generalized.v
+    mass.each_with_index do |entry, i, j|
+      assert_in_delta(i == j ? 1 : 0, entry, 1e-13)
+    end
+    assert_operator generalized.residuals[:mass_residual_norm], :<, 1e-13
+    assert_operator generalized.residuals[:max_residual_norm], :<, 1e-13
+  end
+
+  def test_generalized_eigensystem_reports_ill_conditioned_b
+    a = Matrix[[2, 1], [1, 2]]
+    b = Matrix[[1, 0], [0, 1e-12]]
+    generalized = a.generalized_eigensystem(b)
+
+    assert_operator generalized.residuals[:b_condition_number], :>, 1e11
+    assert_operator generalized.residuals[:max_relative_residual], :<, 1e-8
+    assert_operator generalized.residuals[:mass_residual_norm], :<, 1e-8
+    assert generalized.residuals[:residual_matrix].is_a?(Matrix)
+  end
+
+  def test_generalized_eigensystem_empty_matrices
+    empty = Matrix.empty
+    generalized = empty.generalized_eigensystem(empty)
+
+    assert_equal [], generalized.eigenvalues
+    assert_equal [], generalized.eigenvectors
+    assert_equal Matrix.empty, generalized.v
+    assert_equal Matrix.empty, generalized.d
+    assert_equal Matrix.empty, generalized.v_inv
+    assert_equal 1.0, generalized.residuals[:b_condition_number]
+  end
+
+  def test_generalized_eigensystem_rejects_numerically_overflowing_scale
+    a = Matrix[[2]]
+    b = Matrix[[1e-320]]
+
+    assert_raise(Matrix::ErrNotRegular) do
+      a.generalized_eigensystem(b)
+    end
+
+    assert_equal [[2]], a.to_a
+    assert_equal [[1e-320]], b.to_a
+  end
+
+  def test_generalized_eigensystem_validates_arguments
+    a = Matrix[[2, 1], [1, 2]]
+    b = Matrix[[4, 0], [0, 1]]
+
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix[[1, 0, 0], [0, 1, 0]].generalized_eigensystem(Matrix.identity(2))
+    end
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      a.generalized_eigensystem(Matrix.identity(3))
+    end
+    assert_raise(ArgumentError) do
+      a.generalized_eigensystem(Matrix[[4, 0], [0, Float::NAN]])
+    end
+    assert_raise(ArgumentError) do
+      a.generalized_eigensystem(Matrix[[4, Float::INFINITY], [0, 1]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix[[2, 2], [1, 2]].generalized_eigensystem(b)
+    end
+    assert_raise(ArgumentError) do
+      a.generalized_eigensystem(Matrix[[4, 1], [0, 1]])
+    end
+    assert_raise(Matrix::ErrNotPositiveDefinite) do
+      a.generalized_eigensystem(Matrix[[0, 0], [0, 1]])
+    end
+    assert_raise(Matrix::ErrNotPositiveDefinite) do
+      a.generalized_eigensystem(Matrix[[1, 0], [0, -1]])
+    end
+    assert_raise(TypeError) do
+      a.generalized_eigensystem(Matrix[[1, 0], [0, Complex(1, 1)]])
+    end
+    assert_raise(TypeError) do
+      a.generalized_eigensystem(Matrix[["1", 0], [0, 1]])
+    end
+  end
+
+  def test_generalized_eigensystem_leaves_arguments_unchanged_on_failure
+    a = Matrix[[2, 1], [1, 2]]
+    bad_b = Matrix[[1, 0], [0, -1]]
+    a_values = a.to_a
+    b_values = bad_b.to_a
+
+    assert_raise(Matrix::ErrNotPositiveDefinite) do
+      a.generalized_eigensystem(bad_b)
+    end
+
+    assert_equal a_values, a.to_a
+    assert_equal b_values, bad_b.to_a
+
+    a.freeze
+    bad_b.freeze
+    assert_raise(Matrix::ErrNotPositiveDefinite) do
+      a.generalized_eigensystem(bad_b)
+    end
+  end
+
   def test_eigenvalues_and_eigenvectors_nonsymmetric
     m = Matrix[
       [8, 1],
