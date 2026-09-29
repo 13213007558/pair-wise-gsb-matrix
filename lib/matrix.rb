@@ -62,6 +62,7 @@ class Matrix
   include Enumerable
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
+  autoload :GeneralizedEigenvalueDecomposition, "matrix/generalized_eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
 
   # instance creations
@@ -1553,6 +1554,18 @@ class Matrix
     EigenvalueDecomposition.new(self)
   end
   alias_method :eigen, :eigensystem
+
+  #
+  # Returns the generalized eigensystem for +A*v = lambda*B*v+;
+  # see +GeneralizedEigenvalueDecomposition+.
+  # Both matrices must be finite, real and symmetric. Matrix +b+ must
+  # also be positive definite. The columns of +v+ satisfy +v.t*b*v = I+.
+  #
+  def generalized_eigensystem(b)
+    GeneralizedEigenvalueDecomposition.new(self, b)
+  end
+  alias_method :generalized_eigen, :generalized_eigensystem
+  alias_method :generalized_eigenvalue_decomposition, :generalized_eigensystem
 
   #
   # Returns the LUP decomposition of the matrix; see +LUPDecomposition+.

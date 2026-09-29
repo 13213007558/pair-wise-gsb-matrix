@@ -787,6 +787,124 @@ class TestMatrix < Test::Unit::TestCase
     assert_in_epsilon(vectors[1][0], vectors[1][1])
   end
 
+  def test_generalized_eigensystem_with_identity_b
+    a = Matrix[
+      [8, 1],
+      [1, 8]
+    ]
+    b = Matrix.identity(2)
+    decomposition = a.generalized_eigensystem(b)
+    standard = a.eigensystem
+
+    assert_equal(standard.eigenvalues, decomposition.eigenvalues)
+    assert_in_epsilon(1.0, (decomposition.v.transpose * b * decomposition.v)[0, 0])
+    assert_in_epsilon(1.0, (decomposition.v.transpose * b * decomposition.v)[1, 1])
+    assert_in_epsilon(0.0, (decomposition.v.transpose * b * decomposition.v)[0, 1])
+    assert_equal(standard.v.round(12), decomposition.v.round(12))
+    assert_equal(decomposition.v_inv, decomposition.v.transpose * b)
+    assert_equal((decomposition.v * decomposition.d * decomposition.v_inv).round(10), a)
+  end
+
+  def test_generalized_eigensystem_scaled_b_and_non_diagonal_a
+    a = Matrix[
+      [1, Rational(1, 2)],
+      [Rational(1, 2), 8]
+    ]
+    b = Matrix[
+      [1, Rational(1, 2)],
+      [Rational(1, 2), 4]
+    ]
+    decomposition = a.generalized_eigensystem(b)
+    v, d = decomposition
+
+    assert_in_epsilon(1.0, decomposition.eigenvalues[0])
+    assert_in_epsilon(31.0 / 15.0, decomposition.eigenvalues[1])
+    assert((a * v - b * v * d).to_a.flatten.all? { |entry| entry.abs < 1e-12 })
+    assert_in_epsilon(1.0, (v.transpose * b * v)[0, 0])
+    assert_in_epsilon(1.0, (v.transpose * b * v)[1, 1])
+    assert_in_epsilon(0.0, (v.transpose * b * v)[0, 1])
+    assert_equal(2, decomposition.residual_norms.size)
+    assert(decomposition.relative_residual_norms.all? { |residual| residual < 1e-12 })
+    assert(decomposition.orthonormality_error < 1e-12)
+    assert_in_epsilon(b.eigensystem.eigenvalues.last / b.eigensystem.eigenvalues.first,
+                      decomposition.b_condition_number)
+    assert_equal([[1, Rational(1, 2)], [Rational(1, 2), 8]], a.to_a)
+    assert_equal([[1, Rational(1, 2)], [Rational(1, 2), 4]], b.to_a)
+  end
+
+  def test_generalized_eigensystem_repeated_eigenvalues
+    b = Matrix[
+      [2, 1],
+      [1, 2]
+    ]
+    a = 2 * b
+    decomposition = a.generalized_eigensystem(b)
+
+    assert_in_epsilon(2.0, decomposition.eigenvalues[0])
+    assert_in_epsilon(2.0, decomposition.eigenvalues[1])
+    residual = (a * decomposition.v - b * decomposition.v * decomposition.d)
+    assert(residual.to_a.flatten.all? { |entry| entry.abs < 1e-12 })
+    assert_in_epsilon(1.0, (decomposition.v.transpose * b * decomposition.v)[0, 0])
+    assert_in_epsilon(1.0, (decomposition.v.transpose * b * decomposition.v)[1, 1])
+    assert_in_epsilon(0.0, (decomposition.v.transpose * b * decomposition.v)[0, 1])
+  end
+
+  def test_generalized_eigensystem_reports_ill_conditioned_b
+    a = Matrix[
+      [1, 1],
+      [1, 1]
+    ]
+    b = Matrix[
+      [1e-300, 0],
+      [0, 1e300]
+    ]
+    decomposition = a.generalized_eigensystem(b)
+
+    assert_equal(Float::INFINITY, decomposition.b_condition_number)
+    assert(decomposition.residual_norms.all?(&:finite?))
+    assert(decomposition.orthonormality_error.finite?)
+  end
+
+  def test_generalized_eigensystem_validates_inputs
+    valid_a = Matrix[[2, 1], [1, 2]]
+    valid_b = Matrix[[2, 1], [1, 2]]
+    assert_raise(TypeError) { valid_a.generalized_eigensystem([[2, 1], [1, 2]]) }
+    assert_raise(TypeError) { Matrix[[2, 1], [1, 2]].generalized_eigensystem(nil) }
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix[[2, 1, 0], [1, 2, 0], [0, 0, 1]].generalized_eigensystem(valid_b)
+    end
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix[[2, 1, 0]].generalized_eigensystem(Matrix.identity(3))
+    end
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      valid_a.generalized_eigensystem(Matrix[[2, 1, 0]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix[[2, Float::NAN], [Float::NAN, 2]].generalized_eigensystem(valid_b)
+    end
+    assert_raise(ArgumentError) do
+      valid_a.generalized_eigensystem(Matrix[[2, Float::INFINITY], [Float::INFINITY, 2]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix[[2, Complex::I], [Complex::I, 2]].generalized_eigensystem(valid_b)
+    end
+    assert_raise(ArgumentError) { Matrix[[2, 1], [0, 2]].generalized_eigensystem(valid_b) }
+    assert_raise(ArgumentError) { valid_a.generalized_eigensystem(Matrix[[2, 1], [0, 2]]) }
+    assert_raise(Matrix::ErrNotRegular) { valid_a.generalized_eigensystem(Matrix[[0, 0], [0, 1]]) }
+    assert_raise(Matrix::ErrNotRegular) { valid_a.generalized_eigensystem(Matrix[[1, 0], [0, -1]]) }
+  end
+
+  def test_generalized_eigensystem_failure_preserves_arguments
+    a = Matrix[[2, 1], [1, 2]]
+    b = Matrix[[0, 1], [1, 2]]
+    original_a = a.to_a
+    original_b = b.to_a
+
+    assert_raise(Matrix::ErrNotRegular) { a.generalized_eigensystem(b) }
+    assert_equal(original_a, a.to_a)
+    assert_equal(original_b, b.to_a)
+  end
+
   def test_eigenvalues_and_eigenvectors_nonsymmetric
     m = Matrix[
       [8, 1],
