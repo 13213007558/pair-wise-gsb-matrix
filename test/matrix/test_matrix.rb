@@ -180,6 +180,121 @@ class TestMatrix < Test::Unit::TestCase
     assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { @m1.inverse }
   end
 
+  def assert_matrix_in_delta(expected, actual, delta = 1e-9)
+    assert_equal(expected.row_count, actual.row_count)
+    assert_equal(expected.column_count, actual.column_count)
+    expected.each_with_index do |e, i, j|
+      assert((e - actual[i, j]).abs <= delta, "element (#{i}, #{j}): #{e.inspect} vs #{actual[i, j].inspect}")
+    end
+  end
+
+  def assert_vector_in_delta(expected, actual, delta = 1e-9)
+    assert_equal(expected.size, actual.size)
+    expected.each_with_index do |e, i|
+      assert((e - actual[i]).abs <= delta, "element (#{i}): #{e.inspect} vs #{actual[i].inspect}")
+    end
+  end
+
+  def assert_moore_penrose(m, delta = 1e-9)
+    pinv, rank = m.pseudoinverse
+    assert_kind_of(Matrix, pinv)
+    assert_equal(m.column_count, pinv.row_count)
+    assert_equal(m.row_count, pinv.column_count)
+    assert_matrix_in_delta(m, m * pinv * m, delta)
+    assert_matrix_in_delta(pinv, pinv * m * pinv, delta)
+    assert_matrix_in_delta((m * pinv).adjoint, m * pinv, delta)
+    assert_matrix_in_delta((pinv * m).adjoint, pinv * m, delta)
+    [pinv, rank]
+  end
+
+  def test_pseudoinverse
+    pinv, rank = Matrix[[-1, -1], [0, -1]].pseudoinverse
+    assert_equal(2, rank)
+    assert_matrix_in_delta(Matrix[[-1.0, 1.0], [0.0, -1.0]], pinv)
+    assert_matrix_in_delta(Matrix[[-1.0, 1.0], [0.0, -1.0]], Matrix[[-1, -1], [0, -1]].pinv.first)
+  end
+
+  def test_pseudoinverse_rectangular
+    _, rank = assert_moore_penrose(@m1)
+    assert_equal(2, rank)
+    assert_moore_penrose(@m1.transpose)
+    assert_moore_penrose(@a5)
+    assert_moore_penrose(@a5.transpose)
+  end
+
+  def test_pseudoinverse_rank_deficient
+    pinv, rank = assert_moore_penrose(Matrix[[1.0, 2.0], [2.0, 4.0]])
+    assert_equal(1, rank)
+    assert_matrix_in_delta(Matrix[[0.04, 0.08], [0.08, 0.16]], pinv)
+    _, rank = assert_moore_penrose(Matrix[[1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 2.0]])
+    assert_equal(2, rank)
+  end
+
+  def test_pseudoinverse_complex
+    m = Matrix[[Complex(1, 1), 2.0], [3.0, Complex(0, 1)], [1.0, 0.0]]
+    assert_moore_penrose(m)
+    assert_moore_penrose(m.adjoint)
+    _, rank = assert_moore_penrose(Matrix[[Complex(1, 1), Complex(2, 2)], [Complex(1, -1), Complex(2, -2)]])
+    assert_equal(1, rank)
+  end
+
+  def test_pseudoinverse_zero_and_empty
+    pinv, rank = Matrix.zero(3, 2).pseudoinverse
+    assert_equal(Matrix.zero(2, 3), pinv)
+    assert_equal(0, rank)
+    pinv, rank = Matrix.empty(0, 3).pseudoinverse
+    assert_equal(Matrix.zero(3, 0), pinv)
+    assert_equal(0, rank)
+    pinv, rank = Matrix.empty(2, 0).pseudoinverse
+    assert_equal(Matrix.zero(0, 2), pinv)
+    assert_equal(0, rank)
+    pinv, rank = Matrix.empty(0, 0).pseudoinverse
+    assert_equal(Matrix.empty(0, 0), pinv)
+    assert_equal(0, rank)
+  end
+
+  def test_pseudoinverse_extreme_singular_values
+    u = Matrix[[1.0, 1.0], [1.0, -1.0]] / Math.sqrt(2)
+    m = u * Matrix.diagonal(1.0, 1e-10) * u.transpose
+    pinv, rank = assert_moore_penrose(m, 1e-6)
+    assert_equal(2, rank)
+    assert_matrix_in_delta(u * Matrix.diagonal(1.0, 1e10) * u.transpose, pinv, 1e4)
+  end
+
+  def test_pseudoinverse_rcond
+    m = Matrix.diagonal(1.0, 1e-3, 1e-9)
+    _, rank = m.pseudoinverse
+    assert_equal(3, rank)
+    pinv, rank = m.pseudoinverse(1e-6)
+    assert_equal(2, rank)
+    assert_matrix_in_delta(Matrix.diagonal(1.0, 1e3, 0.0), pinv)
+    _, rank = m.pseudoinverse(0)
+    assert_equal(3, rank)
+    assert_raise(ArgumentError) { m.pseudoinverse(-1) }
+    assert_raise(ArgumentError) { m.pseudoinverse("x") }
+  end
+
+  def test_pseudoinverse_min_norm_least_squares
+    # Overdetermined: minimizes the residual
+    a = Matrix[[1.0, 1.0], [1.0, 2.0], [1.0, 3.0], [1.0, 4.0]]
+    b = Vector[6.0, 5.0, 7.0, 10.0]
+    pinv, = a.pseudoinverse
+    x = pinv * b
+    assert_vector_in_delta((a.adjoint * a).inverse * a.adjoint * b, x)
+    residual = (a * x - b).r
+    assert_operator((a * (x + Vector[0.1, -0.2]) - b).r, :>, residual)
+
+    # Underdetermined: exact solution with minimum norm
+    a = Matrix[[1.0, 2.0, 3.0], [4.0, 5.0, 7.0]]
+    b = Vector[1.0, 2.0]
+    pinv, = a.pseudoinverse
+    x = pinv * b
+    assert_vector_in_delta(b, a * x)
+    z = Vector[1.0, -5.0, 3.0] # in the null space of a
+    assert_vector_in_delta(Vector[0.0, 0.0], a * z)
+    assert_operator((x + z).r, :>, x.r)
+  end
+
   def test_determinant
     assert_equal(0, Matrix[[0,0],[0,0]].determinant)
     assert_equal(45, Matrix[[7,6], [3,9]].determinant)

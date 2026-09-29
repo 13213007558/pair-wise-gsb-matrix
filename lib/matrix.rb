@@ -1226,6 +1226,137 @@ class Matrix
   end
 
   #
+  # Returns the Moore-Penrose pseudoinverse of the matrix, along with the
+  # numerical rank used to compute it, as an array of the form
+  # `[pseudoinverse, rank]`.
+  #
+  # The pseudoinverse is computed through a singular value decomposition,
+  # so unlike #inverse it is defined for matrices of any shape and rank,
+  # including rectangular, rank-deficient, zero and empty matrices. For
+  # complex matrices the conjugate transpose (adjoint) is used wherever a
+  # transpose would appear in the real case.
+  #
+  # Singular values less than or equal to +rcond+ times the largest singular
+  # value are treated as zero; the number of remaining singular values is
+  # the returned rank. +rcond+ defaults to
+  # `Float::EPSILON * max(row_count, column_count)`.
+  #
+  #   pinv, rank = Matrix[[1, 2], [3, 4]].pseudoinverse
+  #   pinv  # => Matrix[[-2.0, 1.0], [1.5, -0.5]]
+  #   rank  # => 2
+  #
+  #   pinv, rank = Matrix[[1, 2, 3]].pseudoinverse
+  #   pinv  # => Matrix[[0.0714...], [0.1428...], [0.2142...]]
+  #   rank  # => 1
+  #
+  def pseudoinverse(rcond = nil)
+    rcond = Float::EPSILON * [row_count, column_count].max if rcond.nil?
+    rcond = Float(rcond)
+    raise ArgumentError, "rcond must be non-negative" if rcond < 0
+    return [self.class.zero(column_count, row_count), 0] if row_count == 0 || column_count == 0
+
+    if row_count >= column_count
+      left, values, right = svd_tall
+      left, right = right, left
+    else
+      left, values, right = adjoint.send(:svd_tall)
+    end
+    cutoff = rcond * values.first
+    sinv = values.map {|sv| sv > cutoff ? 1.0 / sv : 0.0 }
+    rank = sinv.count {|sv| sv != 0.0 }
+    rows = Array.new(column_count) do |i|
+      Array.new(row_count) do |j|
+        sum = 0.0
+        left.each_with_index do |lcol, k|
+          s = sinv[k]
+          sum += lcol[i] * s * right[k][j].conjugate if s != 0.0
+        end
+        sum
+      end
+    end
+    [self.class.rows(rows), rank]
+  end
+  alias_method :pinv, :pseudoinverse
+
+  # Computes the singular value decomposition of a matrix that has at least
+  # as many rows as columns, using one-sided Jacobi rotations applied
+  # directly to the matrix (the normal equations are never formed, so the
+  # condition number is not squared).
+  # Returns `[u_columns, singular_values, v_columns]` where +u_columns+ and
+  # +v_columns+ are arrays of column arrays such that the matrix equals
+  # `U * Diagonal(singular_values) * V.adjoint`, and the singular values
+  # are sorted in descending order.
+  private def svd_tall # :nodoc:
+    m = row_count
+    n = column_count
+    complex = any? {|e| e.is_a?(Complex) }
+    cols = Array.new(n) do |j|
+      Array.new(m) {|i| complex ? Complex(self[i, j]) : Float(self[i, j]) }
+    end
+    vecs = Array.new(n) do |j|
+      Array.new(n) {|i| i == j ? 1.0 : 0.0 }
+    end
+    vecs.map! {|col| col.map {|e| Complex(e) } } if complex
+
+    100.times do
+      rotated = false
+      (0...n).each do |p|
+        ((p + 1)...n).each do |q|
+          cp = cols[p]
+          cq = cols[q]
+          alpha = 0.0
+          beta = 0.0
+          gamma = complex ? Complex(0.0) : 0.0
+          m.times do |i|
+            a = cp[i]
+            b = cq[i]
+            alpha += a.abs ** 2
+            beta += b.abs ** 2
+            gamma += a.conjugate * b
+          end
+          gabs = gamma.abs
+          next if gabs <= Float::EPSILON * Math.sqrt(alpha * beta)
+          rotated = true
+          if gamma != gabs
+            w = gamma.conjugate / gabs
+            m.times {|i| cq[i] *= w }
+            n.times {|i| vecs[q][i] *= w }
+          end
+          zeta = (alpha - beta) / (2.0 * gabs)
+          t = if zeta == 0.0
+                1.0
+              else
+                (zeta > 0 ? 1.0 : -1.0) / (zeta.abs + Math.sqrt(1.0 + zeta * zeta))
+              end
+          c = 1.0 / Math.sqrt(1.0 + t * t)
+          s = t * c
+          m.times do |i|
+            a = cp[i]
+            b = cq[i]
+            cp[i] = c * a + s * b
+            cq[i] = c * b - s * a
+          end
+          n.times do |i|
+            a = vecs[p][i]
+            b = vecs[q][i]
+            vecs[p][i] = c * a + s * b
+            vecs[q][i] = c * b - s * a
+          end
+        end
+      end
+      break unless rotated
+    end
+
+    values = Array.new(n) {|j| Math.sqrt(cols[j].sum {|e| e.abs ** 2 }) }
+    order = (0...n).sort_by {|j| -values[j] }
+    u_cols = order.map do |j|
+      sigma = values[j]
+      sigma == 0.0 ? Array.new(m, 0.0) : cols[j].map {|e| e / sigma }
+    end
+    [u_cols, order.map {|j| values[j] }, order.map {|j| vecs[j] }]
+  end
+
+  #
   # Matrix exponentiation.
   # Equivalent to multiplying the matrix by itself N times.
   # Non-integer exponents will be handled by diagonalizing the matrix;
