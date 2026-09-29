@@ -180,6 +180,178 @@ class TestMatrix < Test::Unit::TestCase
     assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { @m1.inverse }
   end
 
+  def assert_matrix_close(expected, actual, delta = 1e-12)
+    assert_equal(expected.row_count, actual.row_count)
+    assert_equal(expected.column_count, actual.column_count)
+    expected.each_with_index do |e, i, j|
+      assert((e - actual[i, j]).abs <= delta,
+             "element (#{i}, #{j}): expected #{e.inspect}, got #{actual[i, j].inspect}")
+    end
+  end
+
+  def assert_moore_penrose_identities(a, pinv, delta = 1e-12)
+    assert_matrix_close(a, a * pinv * a, delta)
+    assert_matrix_close(pinv, pinv * a * pinv, delta)
+    assert_matrix_close(a * pinv, (a * pinv).adjoint, delta)
+    assert_matrix_close(pinv * a, (pinv * a).adjoint, delta)
+  end
+
+  def test_pseudoinverse_invertible
+    m = Matrix[[1.0, 2.0], [3.0, 4.0]]
+    result = m.pseudoinverse
+    assert_equal(2, result.rank)
+    assert_matrix_close(m.inverse, result.matrix)
+    assert_moore_penrose_identities(m, result.matrix)
+  end
+
+  def test_pseudoinverse_rectangular
+    [@m4, @m4.transpose].each do |m|
+      result = m.pseudoinverse
+      assert_equal(2, result.rank)
+      assert_equal(m.column_count, result.matrix.row_count)
+      assert_equal(m.row_count, result.matrix.column_count)
+      assert_moore_penrose_identities(m, result.matrix)
+    end
+  end
+
+  def test_pseudoinverse_rank_deficient
+    m = Matrix[[1.0, 2.0], [2.0, 4.0]]
+    result = m.pseudoinverse
+    assert_equal(1, result.rank)
+    assert_matrix_close(m / 25.0, result.matrix)
+    assert_moore_penrose_identities(m, result.matrix)
+  end
+
+  def test_pseudoinverse_zero_matrix
+    result = Matrix.zero(3, 2).pseudoinverse
+    assert_equal(Matrix.zero(2, 3), result.matrix)
+    assert_equal(0, result.rank)
+    assert_equal([0.0, 0.0], result.singular_values)
+  end
+
+  def test_pseudoinverse_empty
+    result = Matrix.empty(0, 0).pseudoinverse
+    assert_equal(Matrix.empty(0, 0), result.matrix)
+    assert_equal(0, result.rank)
+    assert_equal([], result.singular_values)
+    assert_equal(Matrix.empty(3, 0), Matrix.empty(0, 3).pseudoinverse.matrix)
+    assert_equal(Matrix.empty(0, 2), Matrix.empty(2, 0).pseudoinverse.matrix)
+    assert_equal(0, Matrix.empty(0, 3).pseudoinverse.rank)
+  end
+
+  def test_pseudoinverse_complex
+    m = Matrix[[Complex(1, 1), 2], [3, Complex(0, -1)]]
+    result = m.pseudoinverse
+    assert_equal(2, result.rank)
+    assert_moore_penrose_identities(m, result.matrix)
+
+    # the adjoint (conjugate transpose) is used, not the plain transpose
+    assert_matrix_close(Matrix[[Complex(0, -1)]], Matrix[[Complex(0, 1)]].pseudoinverse.matrix)
+
+    # rank-deficient complex matrix
+    m = Matrix[[Complex(1, 0), Complex(0, 1)], [Complex(0, -1), Complex(1, 0)]]
+    result = m.pseudoinverse
+    assert_equal(1, result.rank)
+    assert_moore_penrose_identities(m, result.matrix)
+  end
+
+  def test_pseudoinverse_repeated_singular_values
+    m = Matrix[[1.0, 1.0], [1.0, -1.0]]
+    result = m.pseudoinverse
+    assert_equal(2, result.rank)
+    assert_in_delta(Math.sqrt(2.0), result.singular_values[0])
+    assert_in_delta(Math.sqrt(2.0), result.singular_values[1])
+    assert_matrix_close(m / 2.0, result.matrix)
+    assert_moore_penrose_identities(m, result.matrix)
+  end
+
+  def test_pseudoinverse_graded_matrix
+    # A = M * D with well-conditioned M and D = diagonal(1e8, 1e-8): the
+    # tiny singular value (~6.3e-9) is below EPSILON * sigma_max, yet it
+    # is recovered accurately because the computation does not square the
+    # condition number (as inverting A.adjoint * A would).
+    m = Matrix[[1.0, 2.0], [3.0, 4.0]]
+    d = Matrix.diagonal(1e8, 1e-8)
+    a = m * d
+    result = a.pseudoinverse(rcond: 1e-20)
+    assert_equal(2, result.rank)
+    assert_in_delta(2.0, result.singular_values.inject(:*), 1e-14) # |det(a)|
+    assert_matrix_close(d.pseudoinverse(rcond: 1e-20).matrix * m.inverse, result.matrix, 1e-6)
+    assert_moore_penrose_identities(a, result.matrix, 1e-6)
+
+    # singular values 8 orders of magnitude apart in a rotated matrix
+    t = 0.7
+    q = Matrix[[Math.cos(t), -Math.sin(t)], [Math.sin(t), Math.cos(t)]]
+    a = q * Matrix.diagonal(1e4, 1e-4) * q.transpose
+    result = a.pseudoinverse
+    assert_equal(2, result.rank)
+    assert_in_delta(1e4, result.singular_values[0], 1e-10)
+    assert_in_delta(1e-4, result.singular_values[1], 1e-11)
+    assert_matrix_close(q * Matrix.diagonal(1e-4, 1e4) * q.transpose, result.matrix, 1e-4)
+    assert_moore_penrose_identities(a, result.matrix, 1e-4)
+
+    # with the default cutoff, singular values below
+    # EPSILON * max(row_count, column_count) * sigma_max are discarded
+    result = Matrix.diagonal(1e8, 1.0, 1e-8).pseudoinverse
+    assert_equal(2, result.rank)
+    assert_matrix_close(Matrix.diagonal(1e-8, 1.0, 0.0), result.matrix)
+  end
+
+  def test_pseudoinverse_minimum_norm_least_squares
+    # rank-deficient and inconsistent: minimum-norm minimizer of |Ax - b|
+    a = Matrix[[1.0, 1.0], [1.0, 1.0]]
+    x = a.pseudoinverse.matrix * Vector[1.0, 2.0]
+    assert_in_delta(0.75, x[0])
+    assert_in_delta(0.75, x[1])
+    assert_in_delta(1.5, (a * x)[0])
+    assert_in_delta(1.5, (a * x)[1])
+
+    # underdetermined and consistent: minimum-norm exact solution
+    a = Matrix[[1.0, 2.0, 3.0]]
+    x = a.pseudoinverse.matrix * Vector[6.0]
+    assert_in_delta(6.0, (a * x)[0])
+    assert_in_delta(3.0 / 7, x[0])
+    assert_in_delta(6.0 / 7, x[1])
+    assert_in_delta(9.0 / 7, x[2])
+    # the solution is orthogonal to the null space of A
+    assert_in_delta(0.0, x.inner_product(Vector[2.0, -1.0, 0.0]))
+    assert_in_delta(0.0, x.inner_product(Vector[3.0, 0.0, -1.0]))
+  end
+
+  def test_pseudoinverse_rcond
+    m = Matrix.diagonal(1.0, 1e-6, 1e-12)
+    assert_equal(3, m.pseudoinverse.rank)
+    assert_equal(3, m.pseudoinverse(rcond: 0).rank)
+    assert_equal(2, m.pseudoinverse(rcond: 1e-9).rank)
+    assert_equal(1, m.pseudoinverse(rcond: 1e-4).rank)
+    assert_raise(TypeError) { m.pseudoinverse(rcond: "1e-9") }
+    assert_raise(TypeError) { m.pseudoinverse(rcond: Complex(1)) }
+    assert_raise(ArgumentError) { m.pseudoinverse(rcond: -0.5) }
+    assert_raise(ArgumentError) { m.pseudoinverse(rcond: 1.0) }
+  end
+
+  def test_pseudoinverse_singular_values
+    result = Matrix[[3.0, 0.0], [0.0, 4.0]].pseudoinverse
+    assert_equal([4.0, 3.0], result.singular_values)
+    result = Matrix[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]].pseudoinverse
+    assert_equal(2, result.singular_values.size)
+    assert(result.singular_values[0] >= result.singular_values[1])
+  end
+
+  def test_pseudoinverse_no_dimension_errors
+    # unlike #inverse, the pseudoinverse is defined for any matrix
+    assert_nothing_raised do
+      @m1.pseudoinverse
+      Matrix[[1, 2], [2, 4]].pseudoinverse
+      Matrix.zero(2, 3).pseudoinverse
+    end
+  end
+
+  def test_pseudoinverse_alias
+    m = Matrix[[1.0, 2.0], [3.0, 4.0]]
+    assert_equal(m.pseudoinverse.matrix, m.pinv.matrix)
+  end
+
   def test_determinant
     assert_equal(0, Matrix[[0,0],[0,0]].determinant)
     assert_equal(45, Matrix[[7,6], [3,9]].determinant)

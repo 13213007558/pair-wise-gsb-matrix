@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :Pseudoinverse, "matrix/pseudoinverse"
 
   # instance creations
   private_class_method :new
@@ -1180,6 +1181,28 @@ class Matrix
     self.class.I(row_count).send(:inverse_from, self)
   end
   alias_method :inv, :inverse
+
+  #
+  # Returns the Moore-Penrose pseudoinverse of the matrix;
+  # see Matrix::Pseudoinverse.
+  #
+  # Unlike #inverse, it is defined for real and complex matrices of any
+  # shape, including rectangular and singular ones, so it never raises
+  # ExceptionForMatrix::ErrDimensionMismatch or
+  # ExceptionForMatrix::ErrNotRegular.
+  #
+  #   result = Matrix[[1, 2], [3, 4], [5, 6]].pseudoinverse
+  #   result.matrix  # => the 2x3 pseudoinverse
+  #   result.rank    # => 2
+  #
+  # A relative cutoff for small singular values may be specified:
+  #   Matrix.diagonal(1.0, 1e-12).pseudoinverse(rcond: 1e-10).rank
+  #   #  => 1
+  #
+  def pseudoinverse(rcond: nil)
+    Pseudoinverse.new(self, rcond)
+  end
+  alias_method :pinv, :pseudoinverse
 
   private def inverse_from(src) # :nodoc:
     last = row_count - 1
