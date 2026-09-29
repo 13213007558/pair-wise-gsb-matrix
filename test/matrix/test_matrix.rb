@@ -502,6 +502,85 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(m.lup.solve([2, 5]), Vector[1, Rational(1,2)])
   end
 
+  def test_ldlt
+    m = Matrix[[4, 2, 2], [2, 5, 3], [2, 3, 6]]
+    l, d, p = m.ldlt
+    assert(l.lower_triangular?)
+    m.row_count.times { |i| assert_equal(1, l[i, i]) }
+    assert(p.permutation?)
+    assert_equal(l * d * l.t, p * m * p.t)
+    assert_equal(m, p.t * l * d * l.t * p)
+    assert_equal([3, 0, 0], m.ldlt.inertia)
+    assert(!m.ldlt.singular?)
+  end
+
+  def test_ldlt_zero_diagonal
+    # Invertible although its diagonal is all zeros; needs a 2x2 pivot
+    m = Matrix[[0, 1], [1, 0]]
+    ldlt = m.ldlt
+    assert(!ldlt.singular?)
+    assert_equal([1, 1, 0], ldlt.inertia)
+    assert_equal(Vector[2, 1], ldlt.solve([1, 2]))
+    l, d, p = ldlt
+    assert_equal(l * d * l.t, p * m * p.t)
+    assert_equal(m, p.t * l * d * l.t * p)
+  end
+
+  def test_ldlt_permutation_direction
+    m = Matrix[[0, 0, 1], [0, 1, 0], [1, 0, 0]]
+    ldlt = m.ldlt
+    l, d, p = ldlt.to_ary
+    assert_equal([0, 2, 1], ldlt.pivots)
+    assert_equal(l * d * l.t, p * m * p.t)
+    assert_equal(m, p.t * l * d * l.t * p)
+    assert_equal([2, 1, 0], ldlt.inertia)
+  end
+
+  def test_ldlt_singular
+    m = Matrix[[1, 1], [1, 1]]
+    ldlt = m.ldlt
+    assert(ldlt.singular?)
+    assert(ldlt.nearly_singular?)
+    assert_equal([1, 0, 1], ldlt.inertia)
+    assert_raise(Matrix::ErrNotRegular) { ldlt.solve([1, 2]) }
+  end
+
+  def test_ldlt_nearly_singular
+    # Strictly nonsingular, but the second pivot is numerically zero
+    m = Matrix[[1.0, 1.0], [1.0, 1.0 + 1e-15]]
+    ldlt = m.ldlt
+    assert(!ldlt.singular?)
+    assert(ldlt.nearly_singular?)
+    assert(!ldlt.nearly_singular?(1e-20))
+    assert_equal([2, 0, 0], ldlt.inertia)
+    assert_equal([1, 0, 1], ldlt.inertia(tolerance: 1e-10))
+  end
+
+  def test_ldlt_inertia_of_2x2_block
+    # Eigenvalues are 3 and -1 although both diagonal entries are positive:
+    # the signs of a 2x2 block must not be read off its diagonal entries
+    m = Matrix[[1, 2], [2, 1]]
+    assert_equal([1, 1, 0], m.ldlt.inertia)
+  end
+
+  def test_ldlt_solve
+    m = Matrix[[4, 2, 2], [2, 5, 3], [2, 3, 6]]
+    x = m.ldlt.solve([1, 2, 3])
+    assert_equal(Vector[1, 2, 3], m * x)
+  end
+
+  def test_ldlt_solve_multiple_rhs
+    m = Matrix[[4, 2, 2], [2, 5, 3], [2, 3, 6]]
+    b = Matrix[[1, 2], [3, 4], [5, 6]]
+    x = m.ldlt.solve(b)
+    assert_equal(b, m * x)
+  end
+
+  def test_ldlt_requires_symmetric
+    assert_raise(Matrix::ErrOperationNotDefined) { Matrix[[1, 2], [3, 4]].ldlt }
+    assert_raise(Matrix::ErrDimensionMismatch) { Matrix[[1, 2, 3], [4, 5, 6]].ldlt }
+  end
+
   def test_real
     assert_equal(Matrix[[1, 0, 0], [1, 2, 3]], @c1.real)
   end

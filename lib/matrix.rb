@@ -62,6 +62,7 @@ class Matrix
   include Enumerable
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
+  autoload :LDLTDecomposition, "matrix/ldlt_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
 
   # instance creations
@@ -1568,6 +1569,22 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the LDLt decomposition of the matrix; see +LDLTDecomposition+.
+  # The matrix must be symmetric.
+  #   a = Matrix[[2, 1], [1, 2]]
+  #   l, d, p = a.ldlt
+  #   l.lower_triangular?      # => true
+  #   p.permutation?           # => true
+  #   l * d * l.t == p * a * p.t # => true
+  #   a.ldlt.solve([1, 2])     # => Vector[0, 1]
+  #   a.ldlt.inertia           # => [2, 0, 0]
+  #
+  def ldlt
+    LDLTDecomposition.new(self)
+  end
+  alias_method :ldlt_decomposition, :ldlt
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
