@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :CorrelationRepair, "matrix/correlation_repair"
 
   # instance creations
   private_class_method :new
@@ -1553,6 +1554,21 @@ class Matrix
     EigenvalueDecomposition.new(self)
   end
   alias_method :eigen, :eigensystem
+
+  #
+  # Returns the nearest positive semidefinite correlation matrix to the
+  # receiver. The objective is the weighted sum of squared entry differences.
+  # Diagonal entries are fixed to 1 and +locked+ entries may contain
+  # +[row, column, value]+ triples or a +[row, column] => value+ hash. Locking
+  # one symmetric entry fixes both mirrored positions.
+  #
+  # The returned Matrix::CorrelationRepairResult distinguishes convergence,
+  # mutually incompatible locked entries, and reaching +max_iterations+.
+  #
+  def nearest_correlation_matrix(weights: nil, locked: nil, tolerance: 1e-8, max_iterations: 1000)
+    CorrelationRepair.repair(self, weights, locked, tolerance, max_iterations)
+  end
+  alias_method :repair_correlation, :nearest_correlation_matrix
 
   #
   # Returns the LUP decomposition of the matrix; see +LUPDecomposition+.

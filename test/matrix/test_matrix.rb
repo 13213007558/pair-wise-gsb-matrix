@@ -800,6 +800,108 @@ class TestMatrix < Test::Unit::TestCase
     assert_in_epsilon(-4 * vectors[1][0], vectors[1][1])
   end
 
+  def test_nearest_correlation_minimizes_independently_known_weighted_objective
+    original = Matrix[[1, -1.2], [-1.2, 1]]
+    weights = Matrix[[0, 3], [3, 0]]
+    result = original.nearest_correlation_matrix(weights: weights, tolerance: 1e-10)
+
+    assert_predicate(result, :converged?)
+    assert_kind_of(Integer, result.iterations)
+    assert_operator(result.error, :<=, 1e-10)
+    assert_equal([1.0, 1.0], [result.matrix[0, 0], result.matrix[1, 1]])
+    assert_in_epsilon(result.matrix[0, 1], result.matrix[1, 0])
+    assert_operator(eigenvalues(result.matrix).min, :>=, -1e-10)
+    assert_in_delta(-1.0, result.matrix[0, 1], 1e-7)
+    assert_in_delta(0.24, result.objective, 1e-7)
+    assert_equal(Matrix[[1, -1.2], [-1.2, 1]], original)
+  end
+
+  def test_nearest_correlation_locks_symmetrical_positions
+    original = Matrix[[1, -1.2, 0], [-1.2, 1, 0], [0, 0, 1]]
+    weights = Matrix[
+      [0, 3, 0],
+      [3, 0, 0],
+      [0, 0, 0]
+    ]
+    result = original.nearest_correlation_matrix(
+      weights: weights,
+      locked: {[2, 0] => 0.4},
+      tolerance: 1e-9
+    )
+
+    assert_predicate(result, :converged?)
+    assert_in_delta(0.4, result.matrix[0, 2], 1e-8)
+    assert_in_delta(0.4, result.matrix[2, 0], 1e-8)
+    assert_in_delta(-0.4, result.matrix[1, 2], 1e-8)
+    assert_in_delta(-1.0, result.matrix[0, 1], 1e-7)
+    assert_operator(eigenvalues(result.matrix).min, :>=, -1e-8)
+    assert_in_delta(0.24, result.objective, 1e-7)
+  end
+
+  def test_nearest_correlation_returns_converged_result_without_iteration
+    original = Matrix[[1, 0.5], [0.5, 1]]
+    result = original.nearest_correlation_matrix(max_iterations: 0)
+
+    assert_predicate(result, :converged?)
+    assert_equal(0, result.iterations)
+    assert_operator(result.error, :<=, 1e-8)
+  end
+
+  def test_nearest_correlation_distinguishes_iteration_limit
+    original = Matrix[[1, -1.2], [-1.2, 1]]
+    result = original.nearest_correlation_matrix(max_iterations: 0)
+
+    assert_predicate(result, :iteration_limit_reached?)
+    assert_not_predicate(result, :converged?)
+    assert_equal(0, result.iterations)
+    assert_predicate(result.error, :finite?)
+    assert_kind_of(Matrix, result.matrix)
+  end
+
+  def test_nearest_correlation_detects_lock_conflicts
+    original = Matrix.identity(3)
+    cycle = [[0, 1, 1], [1, 2, 1], [0, 2, -1]]
+    result = original.nearest_correlation_matrix(locked: cycle, max_iterations: 1000)
+
+    assert_predicate(result, :lock_conflict?)
+    assert_not_predicate(result, :converged?)
+    assert_equal(Float::INFINITY, result.error)
+    assert_nil(result.matrix)
+
+    diagonal = original.nearest_correlation_matrix(locked: [[0, 0, 0.5]])
+    assert_predicate(diagonal, :lock_conflict?)
+
+    mirrored = original.nearest_correlation_matrix(
+      locked: [[0, 1, 0.5], [1, 0, 0.6]]
+    )
+    assert_predicate(mirrored, :lock_conflict?)
+  end
+
+  def test_nearest_correlation_validates_arguments
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix[[1, 0], [0, 1], [1, 0]].nearest_correlation_matrix
+    end
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix.identity(2).nearest_correlation_matrix(weights: Matrix.identity(3))
+    end
+    assert_raise(ArgumentError) do
+      Matrix.identity(2).nearest_correlation_matrix(weights: [[0, -1], [-1, 0]])
+    end
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix.identity(2).nearest_correlation_matrix(locked: [[0, 2, 0.5]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix.identity(2).nearest_correlation_matrix(locked: [[0, 1, 1.1]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix.identity(2).nearest_correlation_matrix(tolerance: 0)
+    end
+  end
+
+  def eigenvalues(matrix)
+    matrix.eigensystem.eigenvalues.map(&:to_f)
+  end
+
   def test_unitary?
     assert_equal true, @rot.unitary?
     assert_equal true, ((0+1i) * @rot).unitary?
