@@ -13,6 +13,7 @@
 ##
 
 require_relative "matrix/version"
+require_relative "matrix/correlation_repair"
 
 module ExceptionForMatrix # :nodoc:
   class ErrDimensionMismatch < StandardError

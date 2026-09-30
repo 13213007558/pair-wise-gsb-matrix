@@ -800,6 +800,164 @@ class TestMatrix < Test::Unit::TestCase
     assert_in_epsilon(-4 * vectors[1][0], vectors[1][1])
   end
 
+  def test_repair_correlation_minimizes_unweighted_two_by_two_objective
+    original = Matrix[[1, Rational(-3, 2)], [Rational(-3, 2), 1]]
+    result = Matrix.repair_correlation(original)
+
+    assert_equal :converged, result.status
+    assert result.converged?
+    assert result.iterations > 0
+    assert result.error <= 1e-9
+    assert_equal Matrix[[1, -1], [-1, 1]], result.matrix
+    assert_in_epsilon 0.0, result.matrix.eigensystem.eigenvalues.min, 1e-9
+
+    difference = result.matrix[0, 1] - original[0, 1]
+    assert_in_epsilon difference**2, objective_value(original, result.matrix)
+  end
+
+  def test_repair_correlation_minimizes_weighted_two_by_two_objective
+    original = Matrix[[1, -1.5], [-1.5, 1]]
+    weights = Matrix[[1, 4], [4, 1]]
+    result = Matrix.repair_correlation(original, weights: weights)
+
+    assert_equal :converged, result.status
+    assert result.error <= 1e-9
+    assert_equal Matrix[[1, -1], [-1, 1]], result.matrix
+    assert_operator result.matrix.eigensystem.eigenvalues.min, :>=, -1e-9
+    assert_in_epsilon 1.0, objective_value(original, result.matrix, weights)
+  end
+
+  def test_repair_correlation_locks_both_symmetric_positions
+    original = Matrix[[1, -0.5], [-0.5, 1]]
+    result = Matrix.repair_correlation(original, locked: [[0, 1, -0.75]],
+                                                tolerance: 1e-12)
+
+    assert_equal :converged, result.status
+    assert_equal 0, result.iterations
+    assert_equal Matrix[[1, -0.75], [-0.75, 1]], result.matrix
+    assert result.matrix.symmetric?
+    assert_in_epsilon 0.25, result.matrix.eigensystem.eigenvalues.min
+    assert_in_epsilon 0.0625, objective_value(original, result.matrix)
+  end
+
+  def test_repair_correlation_accepts_hash_locks
+    original = Matrix[[1, 0.2], [0.2, 1]]
+    result = Matrix.repair_correlation(original, locked: {[1, 0] => 0.5})
+
+    assert result.converged?
+    assert_equal Matrix[[1, 0.5], [0.5, 1]], result.matrix
+  end
+
+  def test_repair_correlation_three_by_three_independent_objective
+    original = Matrix[
+      [1,   0.5, 1.1],
+      [0.5, 1,   0.2],
+      [1.1, 0.2, 1]
+    ]
+    result = Matrix.repair_correlation(
+      original,
+      locked: [[0, 1, 0.5], [1, 2, 0.2]]
+    )
+
+    assert_equal :converged, result.status
+    assert result.matrix.symmetric?
+    assert_equal 0.5, result.matrix[0, 1]
+    assert_equal 0.2, result.matrix[1, 2]
+    optimum = 0.1 + Math.sqrt(0.72)
+    assert_in_epsilon optimum, result.matrix[0, 2], 1e-6
+    assert_operator result.matrix.eigensystem.eigenvalues.min, :>=, -1e-8
+    expected_square = (optimum - original[0, 2])**2
+    actual_square = (result.matrix[0, 2] - original[0, 2])**2
+    assert_in_epsilon(expected_square, actual_square, 1e-10)
+  end
+
+  def test_repair_correlation_returns_already_valid_matrix_without_iterations
+    original = Matrix[[1, 0.2], [0.2, 1]]
+    result = Matrix.repair_correlation(original)
+
+    assert result.converged?
+    assert_equal 0, result.iterations
+    assert_equal 0.0, result.error
+    assert_equal original, result.matrix
+    assert_not_same original, result.matrix
+    assert_equal [[1, 0.2], [0.2, 1]], original.to_a
+  end
+
+  def test_repair_correlation_reports_non_convergence_separately
+    original = Matrix[[1, -1.5], [-1.5, 1]]
+    result = Matrix.repair_correlation(original, tolerance: 1e-12,
+                                                max_iterations: 1)
+
+    assert_equal :not_converged, result.status
+    assert result.not_converged?
+    assert !result.converged?
+    assert_equal 1, result.iterations
+    assert_operator result.error, :>, 1e-12
+    assert_nil result.matrix
+  end
+
+  def test_repair_correlation_reports_contradictory_locks
+    original = Matrix[[1, 1, 1], [1, 1, -1], [1, -1, 1]]
+    result = Matrix.repair_correlation(
+      original,
+      locked: [[0, 1, 1], [0, 2, 1], [1, 2, -1]]
+    )
+
+    assert_equal :contradictory_locks, result.status
+    assert result.contradictory_locks?
+    assert !result.converged?
+    assert_nil result.matrix
+    assert_operator result.error, :>, 0.0
+    assert_kind_of Integer, result.iterations
+  end
+
+  def test_repair_correlation_validates_inputs
+    valid = Matrix[[1, 0.2], [0.2, 1]]
+
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix.repair_correlation(Matrix[[1, 0.2]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix.repair_correlation(Matrix[[1, 0.3], [0.2, 1]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix.repair_correlation(Matrix[[0, 0.2], [0.2, 0]])
+    end
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix.repair_correlation(valid, weights: Matrix[[1, 1]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix.repair_correlation(valid, weights: Matrix[[1, 0], [0, 1]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix.repair_correlation(valid, weights: Matrix[[1, 2], [3, 1]])
+    end
+    assert_raise(IndexError) do
+      Matrix.repair_correlation(valid, locked: [[0, 2, 0.5]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix.repair_correlation(valid, locked: [[0, 1, 1.5]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix.repair_correlation(valid, locked: [[0, 0, 0.5]])
+    end
+    assert_raise(ArgumentError) do
+      Matrix.repair_correlation(valid, tolerance: 0)
+    end
+    assert_raise(ArgumentError) do
+      Matrix.repair_correlation(valid, max_iterations: 0)
+    end
+  end
+
+  def objective_value(original, repaired, weights = Matrix[[1, 1], [1, 1]])
+    sum = 0.0
+    original.each_with_index(:all) do |value, row, column|
+      difference = repaired[row, column] - value
+      sum += weights[row, column] * difference * difference
+    end
+    0.5 * sum
+  end
+
   def test_unitary?
     assert_equal true, @rot.unitary?
     assert_equal true, ((0+1i) * @rot).unitary?
