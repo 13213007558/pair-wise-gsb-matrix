@@ -502,6 +502,91 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(m.lup.solve([2, 5]), Vector[1, Rational(1,2)])
   end
 
+  def assert_schur_decomposition(matrix, decomposition, tolerance = 1e-12)
+    q = decomposition.q
+    t = decomposition.t
+    identity = Matrix.I(matrix.row_count).map(&:to_f)
+    assert(q.all? { |entry| entry.is_a?(Float) && entry.finite? })
+    assert(t.all? { |entry| entry.is_a?(Float) && entry.finite? })
+    assert_in_delta 0, (q.transpose * q - identity).map(&:abs).max, tolerance
+    assert_in_delta 0, (q * t * q.transpose - matrix.map(&:to_f)).map(&:abs).max, tolerance
+    t.to_a.each_with_index do |row, i|
+      row.each_with_index do |entry, j|
+        assert_in_delta 0, entry, tolerance if i > j + 1
+      end
+    end
+  end
+
+  def test_real_schur_decomposition
+    matrices = [
+      Matrix[[4, 1, -3], [2, 5, 2], [-1, 4, 7]],
+      Matrix[[0, -1, 2], [1, 0, 3], [0, 0, -4]],
+      Matrix[[3, 1, 0, 2], [0, 2, -1, 1], [0, 1, 2, 3], [0, 0, 0, -5]]
+    ]
+
+    matrices.each do |matrix|
+      decomposition = matrix.schur
+      assert_schur_decomposition(matrix, decomposition)
+      assert_equal 0, decomposition.selected_dimension
+      decomposition.eigenvalue_blocks.each do |block|
+        assert_include [1, 2], block.size
+        if block.size == 2
+          assert_in_delta block.first.real, block.last.real, 1e-12
+          assert_in_delta(-block.first.imaginary, block.last.imaginary, 1e-12)
+        end
+      end
+    end
+  end
+
+  def test_real_schur_reorder_by_real_part_and_magnitude
+    matrix = Matrix[[4, 1, -3], [2, 5, 2], [-1, 4, 7]]
+    selected = matrix.schur(6.0..9.0)
+    assert_schur_decomposition(matrix, selected, 1e-11)
+    assert_equal selected.block_sizes.sum, selected.eigenvalues.size
+    assert_equal 2, selected.selected_dimension
+    assert(selected.eigenvalues.first(2).all? { |value| (6.0..9.0).include?(value.real) })
+
+    by_magnitude = matrix.schur(by: :magnitude, select: 7.0..Float::INFINITY)
+    assert_schur_decomposition(matrix, by_magnitude, 1e-11)
+    assert_equal 1, by_magnitude.selected_dimension
+    assert(by_magnitude.eigenvalues.first.abs >= 7.0)
+  end
+
+  def test_real_schur_reorders_conjugate_pair_together
+    matrix = Matrix[[0, -1, 2], [1, 0, 3], [0, 0, -4]]
+    decomposition = matrix.schur(real_part: -0.5..0.5)
+    assert_schur_decomposition(matrix, decomposition)
+    assert_equal [2, 1], decomposition.block_sizes
+    assert_equal 2, decomposition.selected_dimension
+    assert_in_delta 0, decomposition.t[2, 0], 1e-12
+    assert_in_delta 0, decomposition.t[2, 1], 1e-12
+    assert_equal(-4.0, decomposition.eigenvalues.last.real)
+  end
+
+  def test_real_schur_reorder_does_not_modify_input
+    matrix = Matrix[[4, 1, -3], [2, 5, 2], [-1, 4, 7]]
+    rows = matrix.to_a
+    matrix.schur(0.0...5.0)
+    assert_equal rows, matrix.to_a
+  end
+
+  def test_real_schur_near_repeated_eigenvalues_failure
+    matrix = Matrix[[1, 100, 0], [0, 1.000001, 1], [0, 0, 3]]
+    rows = matrix.to_a
+    error = assert_raise(Matrix::RealSchurDecomposition::ReorderError) do
+      matrix.schur(real_part: 1.0000005..1.000002)
+    end
+    assert_equal :indistinguishable_eigenvalues, error.reason
+    assert_equal rows, matrix.to_a
+  end
+
+  def test_real_schur_validates_inputs
+    assert_raise(Matrix::ErrDimensionMismatch) { Matrix[[1, 2], [3, 4], [5, 6]].schur }
+    assert_raise(ArgumentError) { Matrix[[1, Complex(0, 1)], [2, 3]].schur }
+    assert_raise(ArgumentError) { Matrix[[Float::INFINITY, 0], [0, 1]].schur }
+    assert_raise(ArgumentError) { Matrix[[1, 2], [3, 4]].schur(by: :unknown, select: 1..2) }
+  end
+
   def test_real
     assert_equal(Matrix[[1, 0, 0], [1, 2, 3]], @c1.real)
   end

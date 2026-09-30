@@ -17,14 +17,16 @@ class Matrix
 
     # Constructs the eigenvalue decomposition for a square matrix +A+
     #
-    def initialize(a)
+    def initialize(a, build_eigenvectors = true)
       # @d, @e: Arrays for internal storage of eigenvalues.
       # @v: Array for internal storage of eigenvectors.
       # @h: Array for internal storage of nonsymmetric Hessenberg form.
       raise TypeError, "Expected Matrix but got #{a.class}" unless a.is_a?(Matrix)
+      raise ErrDimensionMismatch unless a.square?
       @size = a.row_count
       @d = Array.new(@size, 0)
       @e = Array.new(@size, 0)
+      @build_eigenvectors = build_eigenvectors
 
       if (@symmetric = a.symmetric?)
         @v = a.to_a
@@ -36,6 +38,14 @@ class Matrix
         @ort = Array.new(@size, 0)
         reduce_to_hessenberg
         hessenberg_to_real_schur
+      end
+
+      unless build_eigenvectors
+        @d = @d.map(&:to_f)
+        @e = @e.map(&:to_f)
+        @v = @v.map { |row| row.map(&:to_f) }
+        @h = @h.map { |row| row.map(&:to_f) } if @h
+        return
       end
     end
 
@@ -531,34 +541,32 @@ class Matrix
             @e[n] = 0.0
             x = @h[n][n-1]
             s = x.abs + z.abs
-            p = x / s
-            q = z / s
-            r = Math.sqrt(p * p+q * q)
-            p /= r
-            q /= r
-
+            c = x / s
+            s = z / s
+            r = Math.sqrt(c * c+s * s)
+            c /= r
+            s /= r
             # Row modification
 
-            (n-1).upto(nn-1) do |j|
-              z = @h[n-1][j]
-              @h[n-1][j] = q * z + p * @h[n][j]
-              @h[n][j] = q * @h[n][j] - p * z
+              (n-1).upto(nn-1) do |j|
+                z = @h[n-1][j]
+                @h[n-1][j] = s * z + c * @h[n][j]
+                @h[n][j] = s * @h[n][j] - c * z
             end
 
             # Column modification
 
-            0.upto(n) do |i|
-              z = @h[i][n-1]
-              @h[i][n-1] = q * z + p * @h[i][n]
-              @h[i][n] = q * @h[i][n] - p * z
-            end
-
+              0.upto(n) do |i|
+                z = @h[i][n-1]
+                @h[i][n-1] = s * z + c * @h[i][n]
+                @h[i][n] = s * @h[i][n] - c * z
+              end
             # Accumulate transformations
 
-            low.upto(high) do |i|
-              z = @v[i][n-1]
-              @v[i][n-1] = q * z + p * @v[i][n]
-              @v[i][n] = q * @v[i][n] - p * z
+              low.upto(high) do |i|
+                z = @v[i][n-1]
+                @v[i][n-1] = s * z + c * @v[i][n]
+                @v[i][n] = s * @v[i][n] - c * z
             end
 
           # Complex pair
@@ -721,6 +729,8 @@ class Matrix
           end  # k loop
         end  # check convergence
       end  # while (n >= low)
+
+      return self unless @build_eigenvectors
 
       # Backsubstitute to find vectors of upper triangular form
 

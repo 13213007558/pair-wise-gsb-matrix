@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :RealSchurDecomposition, "matrix/real_schur_decomposition"
 
   # instance creations
   private_class_method :new
@@ -1553,6 +1554,16 @@ class Matrix
     EigenvalueDecomposition.new(self)
   end
   alias_method :eigen, :eigensystem
+
+  #
+  # Returns the real Schur decomposition of the matrix; see
+  # +RealSchurDecomposition+.
+  #
+  def schur(selector = nil, by: nil, real_part: nil, magnitude: nil, select: nil, &block)
+    RealSchurDecomposition.new(self, selector, by: by, real_part: real_part,
+      magnitude: magnitude, select: select, &block)
+  end
+  alias_method :schur_decomposition, :schur
 
   #
   # Returns the LUP decomposition of the matrix; see +LUPDecomposition+.
