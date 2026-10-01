@@ -188,6 +188,72 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(42, Matrix[[7,0,1,0,12],[8,1,1,9,1],[4,0,0,-7,17],[-1,0,0,-4,8],[10,1,1,8,6]].determinant)
   end
 
+  def test_permanent
+    assert_equal(1, Matrix.empty(0, 0).permanent)
+    assert_equal(7, Matrix[[7]].permanent)
+    assert_equal(10, Matrix[[1, 2], [3, 4]].permanent)
+    assert_equal(-110, @a3.permanent)
+    # The permanent of an all-ones matrix of order n is n!
+    (1..6).each do |n|
+      assert_equal((1..n).reduce(1, :*), Matrix.build(n) { 1 }.permanent)
+    end
+    # Rational entries give an exact Rational result
+    assert_equal(Rational(29, 210),
+                 Matrix[[Rational(1, 2), Rational(1, 3)],
+                        [Rational(1, 5), Rational(1, 7)]].permanent)
+  end
+
+  def test_permanent_derivatives
+    value, deriv = Matrix[[1, 2], [3, 4]].permanent(derivatives: true)
+    assert_equal(10, value)
+    assert_equal(Matrix[[4, 3], [2, 1]], deriv)
+
+    value, deriv = Matrix.empty(0, 0).permanent(derivatives: true)
+    assert_equal(1, value)
+    assert_equal(Matrix.empty(0, 0), deriv)
+
+    # All-ones of order n: permanent is n!, each derivative is (n-1)!
+    value, deriv = Matrix.build(5) { 1 }.permanent(derivatives: true)
+    assert_equal(120, value)
+    assert_equal(Matrix.build(5) { 24 }, deriv)
+
+    # The derivative with respect to each entry is the permanent of
+    # its first minor
+    value, deriv = @a3.permanent(derivatives: true)
+    assert_equal(@a3.permanent, value)
+    3.times do |i|
+      3.times do |j|
+        assert_equal(@a3.first_minor(i, j).permanent, deriv[i, j])
+      end
+    end
+
+    # Rational entries stay exact
+    value, deriv = Matrix[[Rational(1, 2), Rational(1, 3)],
+                          [Rational(1, 5), Rational(1, 7)]].permanent(derivatives: true)
+    assert_equal(Rational(29, 210), value)
+    assert_equal(Matrix[[Rational(1, 7), Rational(1, 5)],
+                        [Rational(1, 3), Rational(1, 2)]], deriv)
+  end
+
+  def test_permanent_errors
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { @m1.permanent }
+    assert_raise(TypeError) { Matrix[[1.0, 2.0], [3.0, 4.0]].permanent }
+    assert_raise(TypeError) { Matrix[[1, 2], [3, "4"]].permanent }
+
+    too_big = Matrix.build(Matrix::PERMANENT_MAX_ORDER + 1) { 1 }
+    error = assert_raise(ExceptionForMatrix::ErrPermanentTooLarge) { too_big.permanent }
+    assert_match(/order limit of #{Matrix::PERMANENT_MAX_ORDER}/, error.message)
+    # The limit can be raised explicitly
+    n = Matrix::PERMANENT_MAX_ORDER + 1
+    assert_equal((1..n).reduce(1, :*), too_big.permanent(max_order: n))
+
+    error = assert_raise(ExceptionForMatrix::ErrPermanentTooLarge) do
+      Matrix[[1, 2], [3, 4]].permanent(budget: 1)
+    end
+    assert_match(/budget/, error.message)
+    assert_equal(10, Matrix[[1, 2], [3, 4]].permanent(budget: 4))
+  end
+
   def test_new_matrix
     assert_raise(TypeError) { Matrix[Object.new] }
     o = Object.new

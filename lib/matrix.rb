@@ -50,6 +50,16 @@ module ExceptionForMatrix # :nodoc:
       super("Sorry, Operation(#{vals[0]}) not implemented: #{vals[1]} op #{vals[2]}")
     end
   end
+
+  class ErrPermanentTooLarge < StandardError
+    def initialize(val = nil)
+      if val
+        super(val)
+      else
+        super("Matrix is too large to compute its permanent within the given budget")
+      end
+    end
+  end
 end
 
 #
@@ -1401,6 +1411,125 @@ class Matrix
     determinant
   end
   alias_method :det_e, :determinant_e
+
+  #
+  # Maximum order of a square matrix for which Matrix#permanent computes
+  # a result by default.
+  #
+  # The permanent is computed by dynamic programming over the 2**n subsets
+  # of columns, which costs O(n * 2**n) exact arithmetic operations and
+  # O(2**n) memory. An order of 16 keeps both well under a second of
+  # computation and a few megabytes of memory.
+  #
+  PERMANENT_MAX_ORDER = 16
+
+  #
+  # Returns the permanent of the matrix.
+  #
+  # The permanent of a square matrix is defined like the determinant,
+  # but without alternating signs:
+  #
+  #   perm(A) = sum over all permutations p of prod(A[i, p(i)])
+  #
+  # Entries must be Integer or Rational, so the result is always exact.
+  #
+  #   Matrix[[1, 2], [3, 4]].permanent
+  #   #  => 10
+  #   Matrix[[1, 1], [1, 1]].permanent
+  #   #  => 2
+  #   Matrix.empty(0, 0).permanent
+  #   #  => 1
+  #
+  # The permanent of an all-ones matrix of order n is n!.
+  #
+  # Pass <tt>derivatives: true</tt> to also get the matrix of first
+  # derivatives of the permanent with respect to each entry, i.e. the
+  # permanents of all first minors (with no sign alternation):
+  #
+  #   Matrix[[1, 2], [3, 4]].permanent(derivatives: true)
+  #   #  => [10, Matrix[[4, 3], [2, 1]]]
+  #
+  # The value and all derivatives are computed together in a single
+  # forward/backward dynamic programming pass over the 2**n subsets of
+  # columns; the derivatives are not computed by recomputing the
+  # permanent once per entry.
+  #
+  # Because the cost grows as O(n * 2**n), the order of the matrix is
+  # limited to PERMANENT_MAX_ORDER by default, and the number of exact
+  # multiply-add steps is limited to +budget+ (which defaults to the
+  # number of steps needed for a matrix of order +max_order+). Both
+  # checks raise ErrPermanentTooLarge instead of letting a large input
+  # hang the process; pass +max_order+ or +budget+ to allow larger
+  # computations.
+  #
+  def permanent(derivatives: false, max_order: PERMANENT_MAX_ORDER, budget: nil)
+    raise ErrDimensionMismatch unless square?
+    n = row_count
+    if n > max_order
+      raise ErrPermanentTooLarge,
+            "matrix of order #{n} exceeds the permanent order limit of #{max_order}; " +            "the cost grows as O(n * 2**n), pass max_order: #{n} to compute it anyway"
+    end
+    @rows.each_with_index do |row, i|
+      row.each_with_index do |entry, j|
+        unless entry.is_a?(Integer) || entry.is_a?(Rational)
+          raise TypeError, "permanent requires Integer or Rational entries, got #{entry.class} at (#{i}, #{j})"
+        end
+      end
+    end
+    # Exact number of multiply-add steps of one dynamic programming sweep.
+    steps = n <= 1 ? n : n << (n - 1)
+    steps *= 2 if derivatives
+    budget ||= 2 * (max_order <= 1 ? max_order : max_order << (max_order - 1))
+    if steps > budget
+      raise ErrPermanentTooLarge,
+            "permanent of a matrix of order #{n}#{' with derivatives' if derivatives} " +            "requires #{steps} exact multiply-add steps, exceeding the budget of #{budget}; " +            "pass a larger budget: to compute it anyway"
+    end
+
+    size = 1 << n
+    popcount = Array.new(size, 0)
+    1.upto(size - 1) {|mask| popcount[mask] = popcount[mask & (mask - 1)] + 1 }
+
+    # Forward sweep: f[mask] is the permanent of the submatrix made of
+    # the first popcount[mask] rows and the columns in mask.
+    f = Array.new(size, 0)
+    f[0] = 1
+    1.upto(size - 1) do |mask|
+      row = @rows[popcount[mask] - 1]
+      sum = 0
+      remaining = mask
+      while remaining != 0
+        bit = remaining & -remaining
+        sum += row[bit.bit_length - 1] * f[mask ^ bit]
+        remaining ^= bit
+      end
+      f[mask] = sum
+    end
+    value = f[size - 1]
+    return value unless derivatives
+
+    # Backward sweep: g[mask] is the derivative of the permanent with
+    # respect to f[mask]. Distributing it over the same edges used in
+    # the forward sweep accumulates the derivative with respect to
+    # every entry in a single pass.
+    g = Array.new(size, 0)
+    g[size - 1] = 1
+    deriv = Array.new(n) { Array.new(n, 0) }
+    (size - 1).downto(1) do |mask|
+      weight = g[mask]
+      next if weight == 0
+      i = popcount[mask] - 1
+      remaining = mask
+      while remaining != 0
+        bit = remaining & -remaining
+        j = bit.bit_length - 1
+        prev = mask ^ bit
+        deriv[i][j] += weight * f[prev]
+        g[prev] += weight * @rows[i][j]
+        remaining ^= bit
+      end
+    end
+    [value, Matrix.rows(deriv)]
+  end
 
   #
   # Returns a new matrix resulting by stacking horizontally
