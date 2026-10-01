@@ -468,6 +468,73 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(2, @m1.rank)
   end
 
+  def test_smith_normal_form
+    d, u, v = Matrix[[6, 0], [0, 10]].smith_normal_form
+    assert_equal(Matrix[[2, 0], [0, 30]], d)
+    assert_smith_normal_form(Matrix[[6, 0], [0, 10]], d, u, v)
+
+    matrices = [
+      Matrix[[6, 0], [0, 10]],
+      Matrix[[-6, 0], [0, 10]],
+      Matrix[[2, 4, 6], [4, 8, 10]],
+      Matrix[[2, 4], [3, 6]],
+      Matrix[[-2, -2], [-2, 2]],
+      Matrix[[1, 0], [2, 0], [0, 1]],
+      Matrix[[0, 0, 0], [0, 0, 0]],
+      Matrix.empty(2, 0),
+      Matrix.empty(0, 3),
+      Matrix.empty(0, 0),
+    ]
+
+    matrices.each do |matrix|
+      d, u, v = matrix.smith_normal_form
+      assert_smith_normal_form(matrix, d, u, v)
+    end
+  end
+
+  def test_smith_normal_form_requires_integers
+    assert_raise(TypeError) { Matrix[[1, 2.0]].smith_normal_form }
+  end
+
+  private def assert_smith_normal_form(matrix, d, u, v)
+    rows = matrix.row_count
+    columns = matrix.column_count
+    rank = d.each(:diagonal).count {|entry| entry != 0 }
+    diagonal = d.each(:diagonal).select {|entry| entry != 0 }
+
+    assert_equal([rows, columns], [d.row_count, d.column_count])
+    assert_equal([rows, rows], [u.row_count, u.column_count])
+    assert_equal([columns, columns], [v.row_count, v.column_count])
+    assert_equal(d, u * matrix * v)
+    assert(d.each(:off_diagonal).all?(&:zero?))
+    assert(d.all? {|entry| entry.is_a?(Integer) })
+    assert(u.all? {|entry| entry.is_a?(Integer) })
+    assert(v.all? {|entry| entry.is_a?(Integer) })
+    assert_equal(1, u.determinant.abs)
+    assert_equal(1, v.determinant.abs)
+    assert(diagonal.all?(&:positive?))
+    assert(diagonal.each_cons(2).all? {|first, second| second % first == 0 })
+
+    if rank == 0
+      assert_predicate d, :zero?
+      return
+    end
+
+    expected_gcd = 1
+    1.upto(rank) do |order|
+      minors = (0...rows).to_a.combination(order).flat_map do |selected_rows|
+        (0...columns).to_a.combination(order).map do |selected_columns|
+          minor_rows = selected_rows.map do |row|
+            selected_columns.map {|column| matrix[row, column] }
+          end
+          Matrix[*minor_rows].determinant
+        end
+      end
+      expected_gcd *= diagonal[order - 1]
+      assert_equal(expected_gcd, minors.reject(&:zero?).map(&:abs).inject(:gcd))
+    end
+  end
+
   def test_trace
     assert_equal(1+5+9, Matrix[[1,2,3],[4,5,6],[7,8,9]].trace)
   end

@@ -1452,6 +1452,209 @@ class Matrix
   end
 
   #
+  # Returns the Smith normal form of an integer matrix.
+  #
+  # The result is a three-element array containing +D+, +U+, and +V+, where
+  # +D+ is the Smith normal form and +U+ and +V+ are unimodular integer
+  # matrices satisfying <code>U * self * V == D</code>.
+  #
+  # The nonzero diagonal entries of +D+ are positive and each one divides the
+  # next:
+  #
+  #   Matrix[[6, 0], [0, 10]].smith_normal_form
+  #   # => [Matrix[[2, 0], [0, 30]], ..., ...]
+  #
+  def smith_normal_form
+    unless all? {|entry| entry.is_a?(Integer) }
+      raise TypeError, "Smith normal form is only defined for integer matrices"
+    end
+
+    a = to_a
+    u = self.class.identity(row_count).to_a
+    v = self.class.identity(column_count).to_a
+    last_pivot = [row_count, column_count].min - 1
+
+    0.upto(last_pivot) do |pivot|
+      pivot_row, pivot_column = smith_find_pivot(a, pivot)
+      break unless pivot_row
+
+      smith_swap_rows(a, u, pivot, pivot_row)
+      smith_swap_columns(a, v, pivot, pivot_column)
+      smith_negate_row(a, u, pivot) if a[pivot][pivot] < 0
+
+      loop do
+        smith_eliminate_rows(a, u, pivot)
+        smith_eliminate_columns(a, v, pivot)
+
+        unless (pivot + 1...row_count).all? {|row| a[row][pivot] == 0 } &&
+            (pivot + 1...column_count).all? {|column| a[pivot][column] == 0 }
+          next
+        end
+
+        bad_entry = smith_find_nondivisible_entry(a, pivot)
+        break unless bad_entry
+
+        smith_add_rows(a, u, pivot, bad_entry.first, 1, 1)
+      end
+    end
+
+    [new_matrix(a, column_count), new_matrix(u, row_count), new_matrix(v, column_count)]
+  end
+
+  private def smith_find_pivot(a, pivot)
+    (pivot...row_count).each do |row|
+      (pivot...column_count).each do |column|
+        return row, column if a[row][column] != 0
+      end
+    end
+    nil
+  end
+
+  private def smith_swap_rows(a, u, first, second)
+    a[first], a[second] = a[second], a[first]
+    u[first], u[second] = u[second], u[first]
+  end
+
+  private def smith_swap_columns(a, v, first, second)
+    a.each {|row| row[first], row[second] = row[second], row[first] }
+    v.each {|row| row[first], row[second] = row[second], row[first] }
+  end
+
+  private def smith_negate_row(a, u, row)
+    a[row].map! {|entry| -entry }
+    u[row].map! {|entry| -entry }
+  end
+
+  private def smith_add_rows(a, u, first, second, first_multiplier, second_multiplier)
+    a[first].each_index do |column|
+      a[first][column] =
+        first_multiplier * a[first][column] +
+        second_multiplier * a[second][column]
+    end
+    u[first].each_index do |column|
+      u[first][column] =
+        first_multiplier * u[first][column] +
+        second_multiplier * u[second][column]
+    end
+  end
+
+  private def smith_eliminate_rows(a, u, pivot)
+    (pivot + 1...row_count).each do |row|
+      value = a[row][pivot]
+      next if value == 0
+
+      divisor = a[pivot][pivot]
+      if value % divisor == 0
+        quotient = value / divisor
+        column_count.times do |column|
+          a[row][column] -= quotient * a[pivot][column]
+        end
+        row_count.times do |column|
+          u[row][column] -= quotient * u[pivot][column]
+        end
+        next
+      end
+
+      gcd, pivot_coefficient, row_coefficient = smith_extended_gcd(divisor, value)
+      old_pivot_row = a[pivot].dup
+      old_row = a[row].dup
+      old_u_pivot_row = u[pivot].dup
+      old_u_row = u[row].dup
+
+      (pivot...column_count).each do |column|
+        a[pivot][column] =
+          pivot_coefficient * old_pivot_row[column] +
+          row_coefficient * old_row[column]
+        a[row][column] =
+          -value / gcd * old_pivot_row[column] +
+          divisor / gcd * old_row[column]
+      end
+
+      row_count.times do |column|
+        u[pivot][column] =
+          pivot_coefficient * old_u_pivot_row[column] +
+          row_coefficient * old_u_row[column]
+        u[row][column] =
+          -value / gcd * old_u_pivot_row[column] +
+          divisor / gcd * old_u_row[column]
+      end
+    end
+  end
+
+  private def smith_eliminate_columns(a, v, pivot)
+    (pivot + 1...column_count).each do |column|
+      value = a[pivot][column]
+      next if value == 0
+
+      divisor = a[pivot][pivot]
+      if value % divisor == 0
+        quotient = value / divisor
+        row_count.times do |row|
+          a[row][column] -= quotient * a[row][pivot]
+        end
+        column_count.times do |row|
+          v[row][column] -= quotient * v[row][pivot]
+        end
+        next
+      end
+
+      gcd, pivot_coefficient, column_coefficient = smith_extended_gcd(divisor, value)
+      old_pivot_column = Array.new(row_count) {|row| a[row][pivot] }
+      old_column = Array.new(row_count) {|row| a[row][column] }
+      old_v_pivot_column = Array.new(column_count) {|row| v[row][pivot] }
+      old_v_column = Array.new(column_count) {|row| v[row][column] }
+
+      (pivot...row_count).each do |row|
+        a[row][pivot] =
+          pivot_coefficient * old_pivot_column[row] +
+          column_coefficient * old_column[row]
+        a[row][column] =
+          -value / gcd * old_pivot_column[row] +
+          divisor / gcd * old_column[row]
+      end
+
+      column_count.times do |row|
+        v[row][pivot] =
+          pivot_coefficient * old_v_pivot_column[row] +
+          column_coefficient * old_v_column[row]
+        v[row][column] =
+          -value / gcd * old_v_pivot_column[row] +
+          divisor / gcd * old_v_column[row]
+      end
+    end
+  end
+
+  private def smith_find_nondivisible_entry(a, pivot)
+    divisor = a[pivot][pivot]
+    (pivot + 1...row_count).each do |row|
+      (pivot + 1...column_count).each do |column|
+        value = a[row][column]
+        return row, column if value != 0 && value % divisor != 0
+      end
+    end
+    nil
+  end
+
+  private def smith_extended_gcd(first, second)
+    old_r, r = first, second
+    old_s, s = 1, 0
+    old_t, t = 0, 1
+
+    until r == 0
+      quotient = old_r / r
+      old_r, r = r, old_r - quotient * r
+      old_s, s = s, old_s - quotient * s
+      old_t, t = t, old_t - quotient * t
+    end
+
+    if old_r < 0
+      [-old_r, -old_s, -old_t]
+    else
+      [old_r, old_s, old_t]
+    end
+  end
+
+  #
   # deprecated; use Matrix#rank
   #
   def rank_e
