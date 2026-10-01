@@ -2493,3 +2493,5 @@ class Vector
     "Vector" + @elements.inspect
   end
 end
+
+require_relative "matrix/nearest_correlation"
