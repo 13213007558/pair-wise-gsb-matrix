@@ -2,6 +2,11 @@
 
 List of new feature changes (excluding most bug fixes and optimizations)
 
+## Unreleased
+
+* Add `Matrix.solve_sylvester` and `Matrix::SylvesterResult` for solving
+  Sylvester equations `A*X + X*B = C`
+
 ## v0.4.0
 
 * Add `Matrix#rotate_entries` [#19]

@@ -303,6 +303,167 @@ class Matrix
     new rows, x.column_count
   end
 
+  # The result of solving a Sylvester equation <code>A*X + X*B = C</code>
+  # with Matrix.solve_sylvester.
+  #
+  class SylvesterResult
+    # The status of the equation: :unique, :infinite or :no_solution.
+    attr_reader :status
+
+    # The unique solution when +status+ is :unique, a particular solution
+    # when +status+ is :infinite, and nil when +status+ is :no_solution.
+    attr_reader :solution
+
+    # Matrices forming a basis of the homogeneous solution space
+    # <code>{X : A*X + X*B = 0}</code>. It depends only on A and B, not
+    # on C, and is empty exactly when the equation admits a unique
+    # solution.
+    attr_reader :homogeneous_basis
+
+    def initialize(status, solution, homogeneous_basis) # :nodoc:
+      @status = status
+      @solution = solution
+      @homogeneous_basis = homogeneous_basis.freeze
+      freeze
+    end
+
+    # Whether the equation admits exactly one solution.
+    def unique?
+      @status == :unique
+    end
+
+    # Whether the equation admits at least one solution.
+    def solvable?
+      @status != :no_solution
+    end
+  end
+
+  # :call-seq:
+  #   Matrix.solve_sylvester(a, b, c)
+  #
+  # Solves the Sylvester equation
+  #
+  #   A*X + X*B = C
+  #
+  # for the unknown matrix +X+, where +a+ and +b+ are square matrices
+  # (possibly of different sizes) and +c+ is a matrix with as many rows
+  # as +a+ and as many columns as +b+.
+  #
+  # The equation has a unique solution for every +c+ unless the spectra
+  # of +a+ and <code>-b</code> intersect; in that case, depending on +c+,
+  # the equation has either infinitely many solutions or none at all.
+  # The returned Matrix::SylvesterResult makes the distinction explicit
+  # through its +status+ (:unique, :infinite or :no_solution) and gives
+  # access to the solution (or a particular one) as well as to a basis of
+  # the homogeneous solution space <code>{X : A*X + X*B = 0}</code>.
+  #
+  # The equivalent linear system is solved by exact Gaussian elimination,
+  # so Integer and Rational entries yield exact (Rational) results.
+  #
+  #   a = Matrix[[3, 1], [2, 4]]
+  #   b = Matrix[[1, 2], [0, 5]]
+  #   c = Matrix[[1, 0], [0, 1]]
+  #   result = Matrix.solve_sylvester(a, b, c)
+  #   result.status     # => :unique
+  #   result.solution   # => Matrix[[(5/18), (-4/45)], [(-1/9), (7/45)]]
+  #   a * result.solution + result.solution * b == c  # => true
+  #
+  #   s_a = Matrix.I(2)
+  #   s_b = -Matrix.I(2) # A*X + X*B is always 0
+  #   Matrix.solve_sylvester(s_a, s_b, Matrix.zero(2)).status # => :infinite
+  #   Matrix.solve_sylvester(s_a, s_b, Matrix.I(2)).status    # => :no_solution
+  #
+  def Matrix.solve_sylvester(a, b, c)
+    a = CoercionHelper.coerce_to_matrix(a)
+    b = CoercionHelper.coerce_to_matrix(b)
+    c = CoercionHelper.coerce_to_matrix(c)
+    raise ErrDimensionMismatch, "Expected a square matrix A" unless a.square?
+    raise ErrDimensionMismatch, "Expected a square matrix B" unless b.square?
+    m = a.row_count
+    n = b.row_count
+    unless c.row_count == m && c.column_count == n
+      raise ErrDimensionMismatch, "Expected C to be a #{m}x#{n} matrix"
+    end
+
+    size = m * n
+    return SylvesterResult.new(:unique, Matrix.empty(m, n), []) if size == 0
+
+    # Vectorize the equation as (I_n ⊗ A + Bᵀ ⊗ I_m) vec(X) = vec(C),
+    # stacking the columns of X and C.
+    system = Array.new(size) { Array.new(size + 1, 0) }
+    n.times do |p|
+      m.times do |i|
+        row = p * m + i
+        m.times do |j|
+          system[row][p * m + j] = a[i, j]
+        end
+        n.times do |q|
+          system[row][q * m + i] += b[q, p]
+        end
+        system[row][size] = c[i, p]
+      end
+    end
+
+    # Exact Gauss-Jordan elimination to reduced row echelon form.
+    pivot_of_row = []
+    rank = 0
+    size.times do |col|
+      pivot = rank
+      max = system[rank][col].abs
+      (rank + 1...size).each do |r|
+        v = system[r][col].abs
+        if v > max
+          max = v
+          pivot = r
+        end
+      end
+      next if max == 0
+
+      system[rank], system[pivot] = system[pivot], system[rank]
+      pivot_row = system[rank]
+      pivot_value = pivot_row[col]
+      (col..size).each do |j|
+        pivot_row[j] = pivot_row[j].quo(pivot_value)
+      end
+      size.times do |r|
+        next if r == rank
+        factor = system[r][col]
+        next if factor == 0
+        factor_row = system[r]
+        (col..size).each do |j|
+          factor_row[j] -= factor * pivot_row[j]
+        end
+      end
+      pivot_of_row << col
+      rank += 1
+    end
+
+    free_columns = (0...size).to_a - pivot_of_row
+    to_matrix = ->(vec) { Matrix.build(m, n) {|i, p| vec[p * m + i] } }
+    homogeneous_basis = free_columns.map do |free|
+      vec = Array.new(size, 0)
+      vec[free] = 1
+      pivot_of_row.each_with_index do |col, r|
+        vec[col] = -system[r][free]
+      end
+      to_matrix.call(vec)
+    end
+
+    if (rank...size).any? {|r| system[r][size] != 0 }
+      SylvesterResult.new(:no_solution, nil, homogeneous_basis)
+    else
+      particular = Array.new(size, 0)
+      pivot_of_row.each_with_index do |col, r|
+        particular[col] = system[r][size]
+      end
+      if rank == size
+        SylvesterResult.new(:unique, to_matrix.call(particular), [])
+      else
+        SylvesterResult.new(:infinite, to_matrix.call(particular), homogeneous_basis)
+      end
+    end
+  end
+
   # :call-seq:
   #   combine(*other_matrices) { |*elements| ... }
   #

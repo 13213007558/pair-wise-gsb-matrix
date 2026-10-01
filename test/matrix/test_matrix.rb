@@ -889,4 +889,103 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(@m1.rotate_entries(-1),
                  @m1.rotate_entries(-5))
   end
+
+  def test_sylvester_unique
+    a = Matrix[[3, 1], [2, 4]]
+    b = Matrix[[1, 2], [0, 5]]
+    c = Matrix[[1, 0], [0, 1]]
+    result = Matrix.solve_sylvester(a, b, c)
+    assert_equal(:unique, result.status)
+    assert(result.unique?)
+    assert(result.solvable?)
+    assert_equal(Matrix[[Rational(5, 18), Rational(-4, 45)],
+                        [Rational(-1, 9), Rational(7, 45)]], result.solution)
+    assert_empty(result.homogeneous_basis)
+    assert_equal(c, a * result.solution + result.solution * b)
+  end
+
+  def test_sylvester_different_sizes
+    a = Matrix[[2, 1], [0, 3]]
+    b = Matrix[[1, 0, 0], [0, 4, 1], [0, 0, 5]]
+    c = Matrix[[1, 2, 3], [4, 5, 6]]
+    result = Matrix.solve_sylvester(a, b, c)
+    assert_equal(:unique, result.status)
+    assert_equal(c, a * result.solution + result.solution * b)
+  end
+
+  def test_sylvester_exact_entries
+    a = Matrix[[Rational(1, 2), 2], [3, 4]]
+    b = Matrix[[5, 6], [7, 8]]
+    c = Matrix[[1, 0], [0, 1]]
+    result = Matrix.solve_sylvester(a, b, c)
+    assert_equal(:unique, result.status)
+    assert(result.solution.all? {|e| e.is_a?(Rational) || e.is_a?(Integer) })
+    assert_equal(c, a * result.solution + result.solution * b)
+  end
+
+  def test_sylvester_infinite_solutions
+    a = Matrix[[1, 1], [0, 1]]
+    b = Matrix[[-1, 0], [1, -1]]
+    x0 = Matrix[[1, 2], [3, 4]]
+    c = a * x0 + x0 * b
+    result = Matrix.solve_sylvester(a, b, c)
+    assert_equal(:infinite, result.status)
+    assert(!result.unique?)
+    assert(result.solvable?)
+    assert_equal(c, a * result.solution + result.solution * b)
+    assert_equal(2, result.homogeneous_basis.size)
+    result.homogeneous_basis.each do |h|
+      assert_equal(Matrix.zero(2), a * h + h * b)
+    end
+    # any combination of the particular and homogeneous solutions solves it
+    h1, h2 = result.homogeneous_basis
+    x = result.solution + 3 * h1 - 2 * h2
+    assert_equal(c, a * x + x * b)
+  end
+
+  def test_sylvester_spectra_meet
+    # same a and b: the status flips between :infinite and :no_solution
+    # depending on c, while the homogeneous space stays the same
+    a = Matrix.I(2)
+    b = -Matrix.I(2)
+    infinite = Matrix.solve_sylvester(a, b, Matrix.zero(2))
+    assert_equal(:infinite, infinite.status)
+    assert_equal(4, infinite.homogeneous_basis.size)
+    none = Matrix.solve_sylvester(a, b, Matrix.I(2))
+    assert_equal(:no_solution, none.status)
+    assert_nil(none.solution)
+    assert(!none.unique?)
+    assert(!none.solvable?)
+    assert_equal(infinite.homogeneous_basis, none.homogeneous_basis)
+  end
+
+  def test_sylvester_no_solution
+    a = Matrix[[1, 1], [0, 1]]
+    b = Matrix[[-1, 0], [1, -1]]
+    result = Matrix.solve_sylvester(a, b, Matrix[[5, 4], [4, 1]])
+    assert_equal(:no_solution, result.status)
+    assert_nil(result.solution)
+    assert_equal(2, result.homogeneous_basis.size)
+  end
+
+  def test_sylvester_empty
+    result = Matrix.solve_sylvester(Matrix.empty, Matrix.I(2), Matrix.empty(0, 2))
+    assert_equal(:unique, result.status)
+    assert_equal(Matrix.empty(0, 2), result.solution)
+  end
+
+  def test_sylvester_dimension_mismatch
+    assert_raise(Matrix::ErrDimensionMismatch) {
+      Matrix.solve_sylvester(Matrix[[1, 2]], Matrix.I(2), Matrix.I(2))
+    }
+    assert_raise(Matrix::ErrDimensionMismatch) {
+      Matrix.solve_sylvester(Matrix.I(2), Matrix[[1, 2], [3, 4], [5, 6]], Matrix.I(2))
+    }
+    assert_raise(Matrix::ErrDimensionMismatch) {
+      Matrix.solve_sylvester(Matrix.I(2), Matrix.I(2), Matrix.I(3))
+    }
+    assert_raise(Matrix::ErrDimensionMismatch) {
+      Matrix.solve_sylvester(Matrix.I(2), Matrix.I(3), Matrix.I(2))
+    }
+  end
 end
