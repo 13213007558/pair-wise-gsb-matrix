@@ -1394,6 +1394,102 @@ class Matrix
   end
 
   #
+  # Returns the determinant of the matrix, computed modulo several small
+  # primes and reconstructed to the exact signed integer with the
+  # Chinese Remainder Theorem.
+  #
+  # This is intended for matrices of Integers whose determinant has many
+  # digits: all intermediate arithmetic is performed modulo primes that
+  # fit in a machine word, so no large intermediate values appear.
+  #
+  # Reconstruction stops as soon as the product of the primes exceeds
+  # twice the Hadamard bound on the determinant's magnitude, which
+  # guarantees that the reconstructed value is the exact determinant.
+  #
+  # A custom sequence of distinct primes may be injected (mainly useful
+  # for testing); it must contain enough primes for the bound above:
+  #
+  #   Matrix[[7,6], [3,9]].determinant_modular(primes: [2, 3, 5, 7, 11])
+  #   #  => 45
+  #
+  def determinant_modular(primes: nil)
+    raise ErrDimensionMismatch unless square?
+    unless @rows.all? { |row| row.all? { |entry| entry.is_a?(Integer) } }
+      raise TypeError, "determinant_modular requires Integer entries"
+    end
+    primes ||= default_modular_primes
+    # Hadamard bound: |det| <= sqrt(product of the squared row norms),
+    # so the determinant is uniquely determined modulo any m with
+    # m * m > 4 * bound_squared.
+    bound_squared = @rows.inject(1) do |product, row|
+      product * row.inject(0) { |sum, entry| sum + entry * entry }
+    end
+    residue = 0
+    modulus = 1
+    primes.each do |prime|
+      r = determinant_mod_prime(prime)
+      # Incremental CRT: lift the residue to modulus * prime.
+      k = (r - residue) % prime * (modulus % prime).pow(prime - 2, prime) % prime
+      residue += modulus * k
+      modulus *= prime
+      break if modulus * modulus > 4 * bound_squared
+    end
+    if modulus * modulus <= 4 * bound_squared
+      raise ArgumentError, "not enough primes to guarantee an exact determinant"
+    end
+    residue -= modulus if 2 * residue > modulus
+    residue
+  end
+
+  #
+  # Private. Use Matrix#determinant_modular
+  #
+  # Returns the determinant of the matrix modulo +prime+, using Gaussian
+  # elimination over the finite field GF(prime). Pivoting makes this
+  # correct even when the matrix is singular modulo +prime+.
+  #
+  private def determinant_mod_prime(prime)
+    size = row_count
+    a = @rows.map { |row| row.map { |entry| entry % prime } }
+    det = 1
+    size.times do |k|
+      pivot_row = (k...size).find { |i| a[i][k] != 0 }
+      return 0 unless pivot_row
+      if pivot_row != k
+        a[k], a[pivot_row] = a[pivot_row], a[k]
+        det = -det
+      end
+      det = det * a[k][k] % prime
+      inverse = a[k][k].pow(prime - 2, prime)
+      (k + 1...size).each do |i|
+        factor = a[i][k] * inverse % prime
+        next if factor.zero?
+        (k + 1...size).each do |j|
+          a[i][j] = (a[i][j] - factor * a[k][j]) % prime
+        end
+      end
+    end
+    det % prime
+  end
+
+  #
+  # Private. Use Matrix#determinant_modular
+  #
+  # Returns a lazy enumerator of odd primes, starting above 2**15 so that
+  # the product of moduli grows quickly while all modular arithmetic stays
+  # within machine-word range.
+  #
+  private def default_modular_primes
+    Enumerator.new do |yielder|
+      candidate = (1 << 15) + 1
+      loop do
+        yielder << candidate if (3..Integer.sqrt(candidate)).step(2).none? { |d| candidate % d == 0 }
+        candidate += 2
+      end
+    end.lazy
+  end
+
+  #
   # deprecated; use Matrix#determinant
   #
   def determinant_e

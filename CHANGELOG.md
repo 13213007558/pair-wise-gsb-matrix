@@ -2,6 +2,10 @@
 
 List of new feature changes (excluding most bug fixes and optimizations)
 
+## Unreleased
+
+* Add `Matrix#determinant_modular`
+
 ## v0.4.0
 
 * Add `Matrix#rotate_entries` [#19]

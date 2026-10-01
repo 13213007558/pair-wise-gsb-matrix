@@ -188,6 +188,46 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(42, Matrix[[7,0,1,0,12],[8,1,1,9,1],[4,0,0,-7,17],[-1,0,0,-4,8],[10,1,1,8,6]].determinant)
   end
 
+  def test_determinant_modular
+    primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67]
+    assert_equal(0, Matrix[[0,0],[0,0]].determinant_modular(primes: primes))
+    assert_equal(45, Matrix[[7,6], [3,9]].determinant_modular(primes: primes))
+    assert_equal(-18, Matrix[[2,0,1],[0,-2,2],[1,2,3]].determinant_modular(primes: primes))
+    assert_equal(-7, Matrix[[0,0,1],[0,7,6],[1,3,9]].determinant_modular(primes: primes))
+    assert_equal(42, Matrix[[7,0,1,0,12],[8,1,1,9,1],[4,0,0,-7,17],[-1,0,0,-4,8],[10,1,1,8,6]].determinant_modular(primes: primes))
+    assert_equal(1, Matrix.identity(5).determinant_modular(primes: primes))
+    assert_equal(1, Matrix.empty(0, 0).determinant_modular(primes: primes))
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { @m1.determinant_modular(primes: primes) }
+    assert_raise(TypeError) { Matrix[[1.0, 2.0], [3.0, 4.0]].determinant_modular(primes: primes) }
+    assert_raise(ArgumentError) { Matrix[[7,6], [3,9]].determinant_modular(primes: [2]) }
+  end
+
+  def test_determinant_modular_rank_deficient_mod_prime
+    # det = -2 vanishes modulo 2, det = 3 vanishes modulo 3;
+    # rank deficiency modulo a prime must not affect reconstruction.
+    assert_equal(-2, Matrix[[1, 2], [3, 4]].determinant_modular(primes: [2, 3, 5, 7]))
+    assert_equal(3, Matrix[[2, 1], [1, 2]].determinant_modular(primes: [2, 3, 5, 7]))
+  end
+
+  def test_determinant_modular_zero
+    assert_equal(0, Matrix[[1, 2], [2, 4]].determinant_modular(primes: [2, 3, 5]))
+    assert_equal(0, Matrix.zero(4).determinant_modular(primes: [2, 3, 5]))
+  end
+
+  def test_determinant_modular_large_determinant
+    m = Matrix[[1234,-567,890,12,-345,678],
+               [901,234,-567,890,123,-456],
+               [789,12,345,-678,901,234],
+               [-567,890,123,456,-789,12],
+               [345,678,-901,234,567,890],
+               [111,-222,333,444,-555,666]]
+    det = m.determinant # exact result from the direct Bareiss path
+    assert_operator(det.abs, :>, 2**48) # far exceeds any single modulus
+    assert_equal(det, m.determinant_modular) # default prime sequence
+    small_primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67]
+    assert_equal(det, m.determinant_modular(primes: small_primes))
+  end
+
   def test_new_matrix
     assert_raise(TypeError) { Matrix[Object.new] }
     o = Object.new
