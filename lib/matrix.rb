@@ -316,6 +316,31 @@ class Matrix
     Matrix.combine(self, *matrices, &block)
   end
 
+  # :call-seq:
+  #   Matrix.nearest_correlation_matrix(matrix, fixed_entries: {}, max_iterations: 1000, tolerance: 1e-10)
+  #
+  # Returns the nearest correlation matrix to +matrix+ in the Frobenius norm.
+  # The result is symmetric, has ones on the diagonal, and is positive
+  # semidefinite.  Off-diagonal entries may be fixed with a Hash whose keys
+  # are +[row, column]+ pairs; the symmetric entry is fixed too.
+  #
+  # The returned Hash always contains +:status+, +:converged+, +:residual+,
+  # and +:objective_value+ (the squared Frobenius norm).  +:status+ is
+  # +:converged+, +:infeasible+, or +:iteration_limit+; an unfinished matrix
+  # is never reported as converged.
+  #
+  #   g = Matrix[[1, 1, 0], [1, 1, 1], [0, 1, 1]]
+  #   Matrix.nearest_correlation_matrix(g)
+  #
+  def Matrix.nearest_correlation_matrix(matrix, fixed_entries: {}, max_iterations: 1000, tolerance: 1e-10)
+    NearestCorrelationMatrixSolver.new(
+      matrix,
+      fixed_entries,
+      max_iterations,
+      tolerance
+    ).solve
+  end
+
   #
   # Matrix.new is private; use ::rows, ::columns, ::[], etc... to create.
   #
@@ -1737,6 +1762,307 @@ class Matrix
       "#{self.class}.empty(#{row_count}, #{column_count})"
     else
       "#{self.class}#{@rows.inspect}"
+    end
+  end
+
+  class NearestCorrelationMatrixSolver # :nodoc: all
+    def initialize(matrix, fixed_entries, max_iterations, tolerance)
+      @matrix = matrix
+      @fixed_entries = fixed_entries
+      @max_iterations = max_iterations
+      @tolerance = tolerance
+    end
+
+    def solve
+      validate_options
+      target, size, fixed, reason = validate_input
+      return infeasible_preflight(target, fixed, reason) if reason
+
+      minimum_eigenvalue = eigenvalues(target).min
+      if fixed_point?(target, fixed, minimum_eigenvalue)
+        return result_hash(:converged, true, target, target, 0, 0.0, minimum_eigenvalue)
+      end
+
+      solve_algorithm(target, size, fixed)
+    end
+
+    private
+
+    def validate_options
+      unless @max_iterations.is_a?(Integer) && @max_iterations > 0
+        raise ArgumentError, "max_iterations must be a positive Integer"
+      end
+      unless @tolerance.is_a?(Numeric) && @tolerance > 0 && @tolerance.finite?
+        raise ArgumentError, "tolerance must be a finite positive number"
+      end
+    end
+
+    def validate_input
+      raise TypeError, "Expected Matrix but got #{@matrix.class}" unless @matrix.is_a?(Matrix)
+      raise ErrDimensionMismatch unless @matrix.square?
+      unless @matrix.symmetric?
+        raise ArgumentError, "matrix must be symmetric"
+      end
+      unless @matrix.all? { |value| value.is_a?(Numeric) && value.real? && value.finite? }
+        raise ArgumentError, "matrix must contain finite real numbers"
+      end
+
+      size = @matrix.row_count
+      target = @matrix.to_a.map { |row| row.map(&:to_f) }
+      fixed, reason = normalize_fixed_entries(size)
+      [target, size, fixed, reason]
+    end
+
+    def normalize_fixed_entries(size)
+      fixed = {}
+      @fixed_entries.each do |key, value|
+        pair = Array.try_convert(key) || (key.respond_to?(:to_ary) ? key.to_ary : nil)
+        unless pair.is_a?(Array) && pair.length == 2 &&
+               pair.all? { |index| index.is_a?(Integer) }
+          raise ArgumentError, "fixed entry keys must be [row, column] pairs"
+        end
+        unless value.is_a?(Numeric) && value.real? && value.finite?
+          raise ArgumentError, "fixed entry values must be finite real numbers"
+        end
+
+        row, column = pair
+        unless row.between?(0, size - 1) && column.between?(0, size - 1)
+          raise IndexError, "fixed entry index [#{row}, #{column}] is outside the matrix"
+        end
+        if row == column
+          raise ArgumentError, "diagonal entries are fixed to 1 and cannot be specified"
+        end
+
+        row, column = column, row if row > column
+        value = value.to_f
+        if fixed.key?([row, column])
+          if fixed[[row, column]] != value
+            conflicting = fixed.map { |(fixed_row, fixed_column), fixed_value|
+              [fixed_row, fixed_column, fixed_value]
+            }
+            conflicting << [row, column, value]
+            return [conflicting, :conflicting_fixed_entries]
+          end
+        elsif value.abs > 1
+          return [[[row, column, value]], :fixed_value_out_of_range]
+        end
+
+        fixed[[row, column]] = value
+      end
+      entries = fixed.map { |(row, column), value| [row, column, value] }
+      if fixed_constraints_infeasible?(entries, size)
+        [entries, :fixed_entries_inconsistent_with_psd]
+      else
+        [entries, nil]
+      end
+    end
+
+    def fixed_constraints_infeasible?(entries, size)
+      parent = (0...size).to_a
+      parity = Array.new(size, 0)
+      find = lambda do |index|
+        unless parent[index] == index
+          root = find.call(parent[index])
+          parity[index] ^= parity[parent[index]]
+          parent[index] = root
+        end
+        parent[index]
+      end
+
+      entries.each do |row, column, value|
+        next unless value.abs == 1
+        relation = value < 0 ? 1 : 0
+        row_root = find.call(row)
+        column_root = find.call(column)
+        if row_root == column_root
+          return true unless (parity[row] ^ parity[column]) == relation
+        else
+          parent[row_root] = column_root
+          parity[row_root] = parity[row] ^ parity[column] ^ relation
+        end
+      end
+
+      entries.any? do |row, column, value|
+        next false unless find.call(row) == find.call(column)
+        expected_value = (parity[row] ^ parity[column]).zero? ? 1.0 : -1.0
+        value != expected_value
+      end
+    end
+
+    def solve_algorithm(target, size, fixed)
+      x = target.map(&:dup)
+      p = zero_matrix(size)
+      q = zero_matrix(size)
+      residual = 0.0
+      y = nil
+
+      (1..@max_iterations).each do |iterations|
+        y = project_to_psd(add_matrices(x, p))
+        p = subtract_matrices(add_matrices(x, p), y)
+        z = project_to_correlation(y, fixed)
+        q = add_matrices(add_matrices(y, q), z.map { |row| row.map { |value| -value } })
+        residual = frobenius_norm(subtract_matrices(z, y))
+        x = z
+
+        if residual <= @tolerance
+          minimum_eigenvalue = eigenvalues(x).min
+          if minimum_eigenvalue >= -@tolerance
+            return result_hash(:converged, true, x, target, iterations, residual, minimum_eigenvalue)
+          end
+        end
+
+        if iterations >= 2
+          status = infeasibility_status(q, fixed, residual, iterations)
+          return status if status
+        end
+      end
+
+      result_hash(:iteration_limit, false, x, target, @max_iterations, residual, eigenvalues(x).min)
+    end
+
+    def project_to_psd(matrix)
+      symmetric = symmetric_matrix(matrix)
+      eigensystem = EigenvalueDecomposition.new(Matrix.send(:new, symmetric))
+      vectors = eigensystem.eigenvector_matrix.to_a
+      eigenvalues = eigensystem.eigenvalues
+      result = zero_matrix(matrix.size)
+      dimension = matrix.size
+
+      eigenvalues.each_with_index do |eigenvalue, eigenindex|
+        weight = [eigenvalue.real.to_f, 0.0].max
+        next if weight.zero?
+        dimension.times do |row|
+          dimension.times do |column|
+            result[row][column] += weight * vectors[row][eigenindex].real.to_f * vectors[column][eigenindex].real.to_f
+          end
+        end
+      end
+
+      symmetric_matrix(result)
+    end
+
+    def project_to_correlation(matrix, fixed)
+      result = matrix.map(&:dup)
+      result.each_index { |index| result[index][index] = 1.0 }
+      fixed.each do |row, column, value|
+        result[row][column] = value
+        result[column][row] = value
+      end
+      result
+    end
+
+    def infeasibility_status(q, fixed, residual, iterations)
+      normalized = symmetric_matrix(q)
+      q_norm = frobenius_norm(normalized)
+      minimum_eigenvalue = eigenvalues(normalized).min
+      tolerance = 1e-9 * [1.0, q_norm].max
+      inner_product = normalized.each_with_index.sum { |row, index| row[index] }
+      fixed.each do |row, column, value|
+        inner_product += 2.0 * normalized[row][column] * value
+      end
+      return unless minimum_eigenvalue >= -tolerance && inner_product <= -tolerance
+
+      certificate = project_to_correlation(normalized, fixed)
+      result = result_hash(
+        :infeasible,
+        false,
+        certificate,
+        @matrix.to_a.map { |row| row.map(&:to_f) },
+        iterations,
+        residual,
+        minimum_eigenvalue
+      )
+      result[:reason] = :infeasibility_certificate
+      result
+    end
+
+    def fixed_point?(matrix, fixed, minimum_eigenvalue)
+      return false unless minimum_eigenvalue >= -@tolerance
+      matrix.each_with_index do |row, index|
+        return false unless row[index] == 1.0
+      end
+      fixed.all? do |row, column, value|
+        matrix[row][column] == value && matrix[column][row] == value
+      end
+    end
+
+    def infeasible_preflight(target, fixed, reason)
+      matrix = target.map(&:dup)
+      matrix.each_index { |index| matrix[index][index] = 1.0 }
+      fixed.each do |row, column, value|
+        matrix[row][column] = value
+        matrix[column][row] = value
+      end
+      result = result_hash(
+        :infeasible,
+        false,
+        matrix,
+        target,
+        0,
+        Float::NAN,
+        Float::NAN
+      )
+      result[:reason] = reason
+      result
+    end
+
+    def result_hash(status, converged, values, target, iterations, residual, minimum_eigenvalue)
+      squared_distance = squared_frobenius_distance(values, target)
+      {
+        status: status,
+        converged: converged,
+        matrix: Matrix.send(:new, values.map(&:dup)),
+        residual: residual,
+        objective_value: squared_distance,
+        frobenius_distance: Math.sqrt(squared_distance),
+        squared_frobenius_distance: squared_distance,
+        minimum_eigenvalue: minimum_eigenvalue,
+        iterations: iterations
+      }
+    end
+
+    def eigenvalues(matrix)
+      EigenvalueDecomposition.new(Matrix.send(:new, symmetric_matrix(matrix))).eigenvalues.map do |value|
+        value.real.to_f
+      end
+    end
+
+    def zero_matrix(size)
+      Array.new(size) { Array.new(size, 0.0) }
+    end
+
+    def symmetric_matrix(matrix)
+      size = matrix.size
+      Array.new(size) do |row|
+        Array.new(size) do |column|
+          (matrix[row][column] + matrix[column][row]) / 2.0
+        end
+      end
+    end
+
+    def add_matrices(left, right)
+      left.each_with_index.map do |row, row_index|
+        row.each_with_index.map { |value, column_index| value + right[row_index][column_index] }
+      end
+    end
+
+    def subtract_matrices(left, right)
+      left.each_with_index.map do |row, row_index|
+        row.each_with_index.map { |value, column_index| value - right[row_index][column_index] }
+      end
+    end
+
+    def frobenius_norm(matrix)
+      Math.sqrt(matrix.sum { |row| row.sum { |value| value * value } })
+    end
+
+    def squared_frobenius_distance(left, right)
+      left.each_with_index.sum do |row, row_index|
+        row.each_with_index.sum do |value, column_index|
+          difference = value - right[row_index][column_index]
+          difference * difference
+        end
+      end
     end
   end
 
