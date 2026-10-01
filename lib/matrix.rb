@@ -1460,6 +1460,133 @@ class Matrix
   end
 
   #
+  # Returns the Smith normal form of an integer matrix as a triple of
+  # matrices <tt>[d, u, v]</tt> such that:
+  #
+  # * <tt>u * self * v == d</tt>
+  # * +d+ is a diagonal matrix of the same dimensions as the receiver
+  # * the nonzero diagonal entries of +d+ are positive and each one
+  #   divides the next
+  # * +u+ and +v+ are square integer unimodular matrices
+  #   (their determinants are +1 or -1)
+  #
+  # The receiver must be an integer matrix; rectangular, rank deficient
+  # and zero matrices are supported. The computation is exact and uses
+  # integer arithmetic only.
+  #
+  #   d, u, v = Matrix.diagonal(6, 10).smith_normal_form
+  #   d   # => Matrix[[2, 0], [0, 30]]
+  #   u * Matrix.diagonal(6, 10) * v == d   # => true
+  #
+  def smith_normal_form
+    each do |e|
+      raise TypeError, "Smith normal form is defined for integer matrices only" unless e.is_a?(Integer)
+    end
+    row_count = self.row_count
+    column_count = self.column_count
+    d = to_a
+    u = Matrix.identity(row_count).to_a
+    v = Matrix.identity(column_count).to_a
+
+    # Elementary row (resp. column) operations applied to +d+, mirrored on
+    # +u+ (resp. +v+) so that the invariant
+    #   Matrix.rows(u) * self * Matrix.rows(v) == Matrix.rows(d)
+    # is preserved throughout.
+    swap_rows = ->(i, j) do
+      d[i], d[j] = d[j], d[i]
+      u[i], u[j] = u[j], u[i]
+    end
+    swap_columns = ->(i, j) do
+      d.each {|row| row[i], row[j] = row[j], row[i] }
+      v.each {|row| row[i], row[j] = row[j], row[i] }
+    end
+    negate_row = ->(i) do
+      d[i].map! {|e| -e }
+      u[i].map! {|e| -e }
+    end
+    add_multiple_of_row = ->(src, dst, factor) do # row dst += factor * row src
+      s = d[src]; t = d[dst]
+      column_count.times {|c| t[c] += factor * s[c] }
+      s = u[src]; t = u[dst]
+      row_count.times {|c| t[c] += factor * s[c] }
+    end
+    add_multiple_of_column = ->(src, dst, factor) do # column dst += factor * column src
+      d.each {|row| row[dst] += factor * row[src] }
+      v.each {|row| row[dst] += factor * row[src] }
+    end
+
+    limit = row_count < column_count ? row_count : column_count
+    k = 0
+    while k < limit
+      loop do
+        # Find a nonzero entry of smallest magnitude in the lower-right
+        # submatrix and move it to position (k, k).
+        pivot_row = pivot_column = nil
+        pivot_abs = nil
+        k.upto(row_count - 1) do |i|
+          di = d[i]
+          k.upto(column_count - 1) do |j|
+            e = di[j]
+            next if e == 0
+            a = e < 0 ? -e : e
+            if pivot_abs.nil? || a < pivot_abs
+              pivot_row = i
+              pivot_column = j
+              pivot_abs = a
+            end
+          end
+        end
+        break if pivot_abs.nil? # remaining submatrix is zero
+
+        swap_rows.call(k, pivot_row) unless pivot_row == k
+        swap_columns.call(k, pivot_column) unless pivot_column == k
+
+        # One Euclidean reduction pass over column k and row k. Any
+        # nonzero remainder left behind is smaller than the pivot and
+        # will be selected as the next pivot, so this terminates.
+        (k + 1).upto(row_count - 1) do |i|
+          q = d[i][k] / d[k][k]
+          add_multiple_of_row.call(k, i, -q) unless q == 0
+        end
+        (k + 1).upto(column_count - 1) do |j|
+          q = d[k][j] / d[k][k]
+          add_multiple_of_column.call(k, j, -q) unless q == 0
+        end
+
+        cleared = true
+        (k + 1).upto(row_count - 1) {|i| cleared &&= d[i][k] == 0 }
+        (k + 1).upto(column_count - 1) {|j| cleared &&= d[k][j] == 0 }
+        next unless cleared
+
+        # Row k and column k are cleared. The pivot must divide every
+        # entry of the remaining submatrix; otherwise fold an offending
+        # row into row k and reduce again.
+        bad_row = nil
+        (k + 1).upto(row_count - 1) do |i|
+          (k + 1).upto(column_count - 1) do |j|
+            if d[i][j] % d[k][k] != 0
+              bad_row = i
+              break
+            end
+          end
+          break if bad_row
+        end
+        if bad_row
+          add_multiple_of_row.call(bad_row, k, 1)
+          next
+        end
+
+        negate_row.call(k) if d[k][k] < 0
+        break
+      end
+      k += 1
+    end
+
+    d = Matrix.empty(row_count, column_count) if row_count == 0
+    [d, u, v].map {|rows| rows.is_a?(Matrix) ? rows : Matrix.rows(rows) }
+  end
+
+  #
   # Returns a new matrix with rotated elements.
   # The argument specifies the rotation (defaults to `:clockwise`):
   # * :clockwise, 1, -3, etc.: "turn right" - first row becomes last column

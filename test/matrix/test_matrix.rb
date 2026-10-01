@@ -468,6 +468,86 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(2, @m1.rank)
   end
 
+  def test_smith_normal_form
+    a = Matrix.diagonal(6, 10)
+    d, u, v = a.smith_normal_form
+    assert_equal(Matrix[[2, 0], [0, 30]], d)
+    assert_equal(d, u * a * v)
+    assert_equal(1, u.determinant.abs)
+    assert_equal(1, v.determinant.abs)
+  end
+
+  def test_smith_normal_form_properties
+    matrices = [
+      Matrix[[2, 4, 4], [-6, 6, 12], [10, -4, -16]],
+      Matrix[[1, 2, 3], [4, 5, 6]],
+      Matrix[[1, 2], [3, 4], [5, 6]],
+      Matrix[[6, 0], [0, 10], [0, 0]],
+      Matrix.zero(3, 4),
+      Matrix.zero(2),
+      Matrix[[0]],
+      Matrix[[-7]],
+      Matrix[[0, 1], [0, 1], [0, 1]],
+      Matrix.empty(0, 3),
+      Matrix.empty(2, 0),
+      Matrix.empty(0, 0),
+    ]
+    srand(42)
+    10.times do
+      matrices << Matrix.build(rand(1..4), rand(1..4)) { rand(-20..20) }
+    end
+    matrices.each do |a|
+      d, u, v = a.smith_normal_form
+      assert_equal(d, u * a * v, "reconstruction failed for #{a}")
+      assert_equal(a.row_count, d.row_count)
+      assert_equal(a.column_count, d.column_count)
+      assert_equal(a.row_count, u.row_count)
+      assert_equal(a.row_count, u.column_count)
+      assert_equal(a.column_count, v.row_count)
+      assert_equal(a.column_count, v.column_count)
+      assert_equal(1, u.determinant.abs, "u not unimodular for #{a}")
+      assert_equal(1, v.determinant.abs, "v not unimodular for #{a}")
+      d.each_with_index do |e, i, j|
+        assert_equal(0, e, "d not diagonal for #{a}") if i != j
+      end
+      diag = (0...[a.row_count, a.column_count].min).map {|i| d[i, i] }
+      nonzero = diag.reject(&:zero?)
+      assert_equal(diag, nonzero + [0] * (diag.size - nonzero.size),
+                   "zero diagonal entries not trailing for #{a}")
+      nonzero.each {|e| assert_send([e, :>, 0], "nonpositive diagonal entry for #{a}") }
+      nonzero.each_cons(2) do |x, y|
+        assert_equal(0, y % x, "divisibility chain broken for #{a}")
+      end
+      assert_equal(smith_invariants_from_minors(a), nonzero,
+                   "invariant factors mismatch for #{a}")
+    end
+  end
+
+  def test_smith_normal_form_requires_integers
+    assert_raise(TypeError) { Matrix[[1.5, 2], [3, 4]].smith_normal_form }
+    assert_raise(TypeError) { Matrix[[Rational(1, 2), 2], [3, 4]].smith_normal_form }
+  end
+
+  # Independent check: the k-th determinantal divisor is the gcd of all
+  # kxk minor determinants, and the invariant factors are their quotients.
+  private def smith_invariants_from_minors(a)
+    rows = (0...a.row_count).to_a
+    columns = (0...a.column_count).to_a
+    divisors = [1]
+    (1..[a.row_count, a.column_count].min).each do |k|
+      gcd = 0
+      rows.combination(k) do |is|
+        columns.combination(k) do |js|
+          minor = Matrix.rows(is.map {|i| a.row(i).to_a.values_at(*js) }).determinant
+          gcd = gcd.gcd(minor)
+        end
+      end
+      break if gcd == 0
+      divisors << gcd
+    end
+    divisors.each_cons(2).map {|prev, cur| cur / prev }
+  end
+
   def test_trace
     assert_equal(1+5+9, Matrix[[1,2,3],[4,5,6],[7,8,9]].trace)
   end
