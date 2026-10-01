@@ -1356,6 +1356,56 @@ class Matrix
   alias_method :det, :determinant
 
   #
+  # Returns the determinant of the matrix, computed modulo small primes
+  # and reconstructed with the Chinese Remainder Theorem.
+  #
+  # This is an explicitly selectable alternative to #determinant (which
+  # uses the Gauss-Bareiss algorithm); both return the same exact result.
+  # It is intended for matrices of large Integers, since all arithmetic
+  # is done modulo the current prime and intermediate values stay small.
+  #
+  # All entries must be Integers. Reconstruction stops as soon as the
+  # product of the moduli exceeds twice the Hadamard bound of the matrix,
+  # which mathematically guarantees that the symmetric residue is the
+  # exact signed determinant, even when the determinant is zero.
+  #
+  # A custom sequence of distinct primes can be injected with +primes+
+  # (mainly useful for testing); it must provide enough primes to reach
+  # the bound, otherwise an ArgumentError is raised.
+  #
+  #   Matrix[[7,6], [3,9]].determinant_modular
+  #   #  => 45
+  #
+  def determinant_modular(primes: nil)
+    raise ErrDimensionMismatch unless square?
+    unless all? {|e| e.is_a?(Integer) }
+      raise TypeError, "determinant_modular requires Integer entries"
+    end
+    bound = hadamard_bound # |determinant| <= bound
+    modulus = 1  # product of the primes used so far
+    residue = 0  # determinant modulo +modulus+
+    (primes || prime_sequence).each do |p|
+      unless p.is_a?(Integer) && p >= 2
+        raise ArgumentError, "moduli must be Integer primes >= 2"
+      end
+      unless modulus.gcd(p) == 1
+        raise ArgumentError, "moduli must be distinct primes"
+      end
+      r = determinant_mod_p(p)
+      # Chinese Remainder Theorem: find t with residue + modulus * t == r (mod p)
+      t = (r - residue) % p * modular_inverse(modulus % p, p) % p
+      residue += modulus * t
+      modulus *= p
+      if modulus > 2 * bound
+        # |determinant| <= bound < modulus / 2, so the symmetric residue
+        # modulo +modulus+ is the determinant itself.
+        return residue > modulus / 2 ? residue - modulus : residue
+      end
+    end
+    raise ArgumentError, "prime sequence exhausted before the Hadamard bound was reached"
+  end
+
+  #
   # Private. Use Matrix#determinant
   #
   # Returns the determinant of the matrix, using
@@ -1391,6 +1441,94 @@ class Matrix
       end
     end
     sign * pivot
+  end
+
+  #
+  # Private. Use Matrix#determinant_modular
+  #
+  # Returns the determinant of the matrix modulo the prime +p+, using
+  # Bareiss' algorithm over the field Z/pZ. Returns 0 if the matrix is
+  # singular modulo +p+ (its rank may drop even when it does not over Z).
+  #
+  private def determinant_mod_p(p)
+    size = row_count
+    last = size - 1
+    a = @rows.map {|row| row.map {|e| e % p } }
+    sign = +1
+    pivot = 1
+    size.times do |k|
+      previous_pivot = pivot
+      if (pivot = a[k][k]) == 0
+        switch = (k+1 ... size).find {|row|
+          a[row][k] != 0
+        }
+        return 0 unless switch
+        a[switch], a[k] = a[k], a[switch]
+        pivot = a[k][k]
+        sign = -sign
+      end
+      inverse = previous_pivot == 1 ? 1 : modular_inverse(previous_pivot, p)
+      (k+1).upto(last) do |i|
+        ai = a[i]
+        (k+1).upto(last) do |j|
+          ai[j] = (pivot * ai[j] - ai[k] * a[k][j]) * inverse % p
+        end
+      end
+    end
+    (sign * pivot) % p
+  end
+
+  #
+  # Private. Use Matrix#determinant_modular
+  #
+  # Returns an Integer upper bound for the absolute value of the
+  # determinant, from Hadamard's inequality: |det| is at most the
+  # product of the Euclidean norms of the rows, each rounded up to
+  # an Integer.
+  #
+  private def hadamard_bound
+    @rows.inject(1) do |product, row|
+      squares = row.inject(0) {|sum, e| sum + e * e }
+      root = Integer.sqrt(squares)
+      root += 1 if root * root < squares
+      product * root
+    end
+  end
+
+  #
+  # Private. Use Matrix#determinant_modular
+  #
+  # Returns the inverse of +a+ modulo +m+, using the extended Euclidean
+  # algorithm. Requires +a+ and +m+ to be coprime.
+  #
+  private def modular_inverse(a, m)
+    old_r, r = a % m, m
+    old_s, s = 1, 0
+    until r == 0
+      q = old_r / r
+      old_r, r = r, old_r - q * r
+      old_s, s = s, old_s - q * s
+    end
+    old_s % m
+  end
+
+  #
+  # Private. Use Matrix#determinant_modular
+  #
+  # Returns an infinite enumerator of the prime numbers.
+  #
+  private def prime_sequence
+    Enumerator.new do |yielder|
+      primes = []
+      n = 2
+      loop do
+        unless primes.take_while {|p| p * p <= n }.any? {|p| n % p == 0 }
+          primes << n
+          yielder << n
+        end
+        n += n == 2 ? 1 : 2
+      end
+    end
   end
 
   #

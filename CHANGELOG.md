@@ -2,6 +2,12 @@
 
 List of new feature changes (excluding most bug fixes and optimizations)
 
+## Unreleased
+
+* Add `Matrix#determinant_modular`, an explicitly selectable determinant
+  path computing modulo small primes and reconstructing the exact signed
+  integer via CRT with a Hadamard-bound termination criterion
+
 ## v0.4.0
 
 * Add `Matrix#rotate_entries` [#19]

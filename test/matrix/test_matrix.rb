@@ -188,6 +188,58 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(42, Matrix[[7,0,1,0,12],[8,1,1,9,1],[4,0,0,-7,17],[-1,0,0,-4,8],[10,1,1,8,6]].determinant)
   end
 
+  def test_determinant_modular
+    assert_equal(1, Matrix.empty(0, 0).determinant_modular)
+    assert_equal(0, Matrix[[0,0],[0,0]].determinant_modular)
+    assert_equal(45, Matrix[[7,6], [3,9]].determinant_modular)
+    assert_equal(-18, Matrix[[2,0,1],[0,-2,2],[1,2,3]].determinant_modular)
+    assert_equal(-7, Matrix[[0,0,1],[0,7,6],[1,3,9]].determinant_modular)
+    assert_equal(42, Matrix[[7,0,1,0,12],[8,1,1,9,1],[4,0,0,-7,17],[-1,0,0,-4,8],[10,1,1,8,6]].determinant_modular)
+    assert_equal(@a3.determinant, @a3.determinant_modular)
+    assert_equal(@a5.determinant, @a5.determinant_modular)
+    assert_equal(@b3.determinant, @b3.determinant_modular)
+    assert_equal(@rot.determinant, @rot.determinant_modular)
+    # truly singular matrices, including a zero row
+    assert_equal(0, Matrix[[1,2,3],[4,5,6],[7,8,9]].determinant_modular)
+    assert_equal(0, Matrix[[1,2],[2,4]].determinant_modular)
+    assert_equal(0, Matrix[[0,0,0],[1,2,3],[4,5,6]].determinant_modular)
+  end
+
+  def test_determinant_modular_large_determinant
+    # Determinants vastly larger than any single modulus used
+    m = Matrix.diagonal(10**6, -2*10**6, 3*10**6, 4*10**6, 5*10**6, 6*10**6, 7*10**6, 8*10**6)
+    assert_operator(m.determinant.abs, :>, 10**40)
+    assert_equal(m.determinant, m.determinant_modular)
+    big = Matrix.build(8) {|i, j| (i * 8 + j + 1) * 10**6 + (i == j ? 7 : -3) }
+    assert_operator(big.determinant.abs, :>, 10**20)
+    assert_equal(big.determinant, big.determinant_modular)
+  end
+
+  def test_determinant_modular_rank_drop_mod_prime
+    m = Matrix[[7,6], [3,9]] # determinant 45, singular modulo 5
+    assert_equal(0, m.determinant % 5)
+    assert_equal(45, m.determinant_modular(primes: [5, 7, 11]))
+    # extra primes are harmless: reconstruction stops at the Hadamard bound
+    assert_equal(45, m.determinant_modular(primes: [5, 7, 11, 13, 17]))
+  end
+
+  def test_determinant_modular_custom_primes
+    m = Matrix[[7,0,1,0,12],[8,1,1,9,1],[4,0,0,-7,17],[-1,0,0,-4,8],[10,1,1,8,6]]
+    assert_equal(42, m.determinant_modular(primes: [101, 103, 107, 109, 113]))
+    # The reconstruction is stable (42) after the first prime already, but
+    # termination requires the Hadamard bound, so too few primes must fail
+    # instead of returning a prematurely stable value.
+    assert_raise(ArgumentError) { m.determinant_modular(primes: [101, 103]) }
+    assert_raise(ArgumentError) { m.determinant_modular(primes: [101, 101, 103]) }
+    assert_raise(ArgumentError) { m.determinant_modular(primes: ["a"]) }
+  end
+
+  def test_determinant_modular_invalid_input
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { @m1.determinant_modular }
+    assert_raise(TypeError) { Matrix[[1.0, 2.0], [3.0, 4.0]].determinant_modular }
+    assert_raise(TypeError) { Matrix[[Rational(1,2), 0], [0, 1]].determinant_modular }
+  end
+
   def test_new_matrix
     assert_raise(TypeError) { Matrix[Object.new] }
     o = Object.new
