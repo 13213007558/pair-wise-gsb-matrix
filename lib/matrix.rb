@@ -70,6 +70,15 @@ class Matrix
   protected :rows
 
   #
+  # The default maximum order (number of rows and columns) of a square
+  # matrix for which Matrix#permanent will compute a result. Computing a
+  # permanent costs O(n * 2**n) operations, so this budget keeps a large
+  # input from silently hanging the process. It can be overridden per
+  # call with the +max_size+ keyword of Matrix#permanent.
+  #
+  PERMANENT_DEFAULT_MAX_SIZE = 16
+
+  #
   # Creates a matrix where each argument is a row.
   #   Matrix[ [25, 93], [-1, 66] ]
   #   #   =>  25 93
@@ -1401,6 +1410,137 @@ class Matrix
     determinant
   end
   alias_method :det_e, :determinant_e
+
+  #
+  # Returns the permanent of the matrix.
+  #
+  # The permanent is the sum, over all permutations +p+ of the columns,
+  # of the products of the entries A[i, p(i)]:
+  #
+  #   perm(A) = Sum_p Prod_i A[i, p(i)]
+  #
+  # For a 0/1 matrix it counts the perfect matchings of the associated
+  # bipartite graph, which makes it useful for small-scale matching
+  # counts.
+  #
+  # Entries must be Integer or Rational so that the result stays exact.
+  #
+  # Unlike the determinant, no polynomial-time algorithm is known for
+  # the permanent; it is computed by dynamic programming over column
+  # subsets, which costs O(n * 2**n) operations. To keep a large input
+  # from silently hanging the process, the matrix order is limited to
+  # +max_size+ (PERMANENT_DEFAULT_MAX_SIZE by default) and an
+  # ArgumentError is raised when the budget is exceeded.
+  #
+  #   Matrix[[7,6], [3,9]].permanent
+  #   #  => 81
+  #
+  # The permanent of an empty (0x0) matrix is 1, and the permanent of
+  # the all-ones matrix of order n is n!:
+  #
+  #   Matrix.build(4) { 1 }.permanent
+  #   #  => 24
+  #
+  # With <tt>with_derivative: true</tt>, returns a pair
+  # <tt>[perm, dperm]</tt> where +dperm+ is the matrix of first-order
+  # partial derivatives of the permanent with respect to each entry;
+  # entry (i, j) of +dperm+ is the permanent of the minor obtained by
+  # removing row i and column j. All derivatives are computed together
+  # with the permanent itself, by combining a forward and a backward
+  # subset DP, not by re-solving the permanent for each entry.
+  #
+  #   perm, dperm = Matrix.build(3) { 1 }.permanent(with_derivative: true)
+  #   perm   # => 6
+  #   dperm  # => Matrix[[2, 2, 2], [2, 2, 2], [2, 2, 2]]
+  #
+  def permanent(with_derivative: false, max_size: PERMANENT_DEFAULT_MAX_SIZE)
+    raise ErrDimensionMismatch unless square?
+    n = row_count
+    if n > max_size
+      raise ArgumentError, "permanent of a #{n}x#{n} matrix exceeds the size budget " +        "(max_size: #{max_size}); the cost grows as O(n * 2**n). " +        "Pass a larger max_size: at your own risk"
+    end
+    each do |entry|
+      unless entry.is_a?(Integer) || entry.is_a?(Rational)
+        raise ArgumentError, "permanent requires Integer or Rational entries " +          "to stay exact, got #{entry.class}"
+      end
+    end
+    return with_derivative ? [1, Matrix.empty(0, 0)] : 1 if n == 0
+
+    full = (1 << n) - 1
+    # Column subsets grouped by their number of columns, so each DP
+    # level only walks the subsets it can actually use.
+    popcount = Array.new(full + 1, 0)
+    (1..full).each { |mask| popcount[mask] = popcount[mask >> 1] + (mask & 1) }
+    masks_by_size = Array.new(n + 1) { [] }
+    (0..full).each { |mask| masks_by_size[popcount[mask]] << mask }
+
+    suffix = nil
+    if with_derivative
+      # suffix[i][mask]: permanent of rows i...n-1 matched to the columns
+      # in +mask+ (which must contain exactly n - i columns).
+      suffix = Array.new(n + 1)
+      suffix[n] = Array.new(full + 1, 0)
+      suffix[n][0] = 1
+      (n - 1).downto(0) do |i|
+        cur = Array.new(full + 1, 0)
+        below = suffix[i + 1]
+        row_i = @rows[i]
+        masks_by_size[n - i].each do |mask|
+          total = 0
+          rest = mask
+          while rest != 0
+            bit = rest & -rest
+            total += row_i[bit.bit_length - 1] * below[mask ^ bit]
+            rest ^= bit
+          end
+          cur[mask] = total
+        end
+        suffix[i] = cur
+      end
+    end
+
+    deriv = with_derivative ? Array.new(n) { Array.new(n, 0) } : nil
+    # dp[mask]: permanent of the first i rows matched to the columns
+    # in +mask+ (which must contain exactly i columns).
+    dp = Array.new(full + 1, 0)
+    dp[0] = 1
+    (0...n).each do |i|
+      if deriv
+        # Entry (i, j) of the derivative is the permanent of the minor
+        # without row i and column j; split it into the matchings of
+        # the rows above i (dp) and below i (suffix) over the remaining
+        # columns.
+        below = suffix[i + 1]
+        deriv_i = deriv[i]
+        masks_by_size[i].each do |mask|
+          value = dp[mask]
+          next if value == 0
+          remaining = full ^ mask
+          rest = remaining
+          while rest != 0
+            bit = rest & -rest
+            deriv_i[bit.bit_length - 1] += value * below[remaining ^ bit]
+            rest ^= bit
+          end
+        end
+      end
+      nxt = Array.new(full + 1, 0)
+      row_i = @rows[i]
+      masks_by_size[i + 1].each do |mask|
+        total = 0
+        rest = mask
+        while rest != 0
+          bit = rest & -rest
+          total += row_i[bit.bit_length - 1] * dp[mask ^ bit]
+          rest ^= bit
+        end
+        nxt[mask] = total
+      end
+      dp = nxt
+    end
+    perm = dp[full]
+    with_derivative ? [perm, Matrix.rows(deriv)] : perm
+  end
 
   #
   # Returns a new matrix resulting by stacking horizontally

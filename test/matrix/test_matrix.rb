@@ -188,6 +188,55 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(42, Matrix[[7,0,1,0,12],[8,1,1,9,1],[4,0,0,-7,17],[-1,0,0,-4,8],[10,1,1,8,6]].determinant)
   end
 
+  def test_permanent
+    assert_equal(1, Matrix.empty(0, 0).permanent)
+    assert_equal(5, Matrix[[5]].permanent)
+    assert_equal(81, Matrix[[7,6], [3,9]].permanent)
+    assert_equal(0, Matrix[[0,0], [0,0]].permanent)
+    assert_equal(1, Matrix.I(4).permanent)
+    assert_equal(24, Matrix.build(4) { 1 }.permanent)
+    assert_equal(720, Matrix.build(6) { 1 }.permanent)
+
+    m = Matrix[[2,0,1,3], [1,1,0,2], [0,3,1,1], [2,1,1,0]]
+    brute = (0...4).to_a.permutation.sum { |p| (0...4).map { |i| m[i, p[i]] }.inject(:*) }
+    assert_equal(brute, m.permanent)
+
+    r = Matrix[[Rational(1,2), Rational(1,3)], [Rational(2,3), Rational(3,4)]]
+    assert_equal(Rational(43, 72), r.permanent)
+    assert_kind_of(Rational, r.permanent)
+
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { @m1.permanent }
+    assert_raise(ArgumentError) { Matrix[[1.0, 2.0], [3.0, 4.0]].permanent }
+    assert_raise(ArgumentError) { Matrix.I(20).permanent }
+    assert_raise(ArgumentError) { Matrix.I(20).permanent(with_derivative: true) }
+    assert_equal(1, Matrix.I(17).permanent(max_size: 17))
+  end
+
+  def test_permanent_with_derivative
+    perm, dperm = Matrix.empty(0, 0).permanent(with_derivative: true)
+    assert_equal(1, perm)
+    assert_equal(Matrix.empty(0, 0), dperm)
+
+    perm, dperm = Matrix[[5]].permanent(with_derivative: true)
+    assert_equal(5, perm)
+    assert_equal(Matrix[[1]], dperm)
+
+    m = Matrix[[2,1,3], [0,4,1], [5,2,2]]
+    perm, dperm = m.permanent(with_derivative: true)
+    assert_equal(m.permanent, perm)
+    expected = Matrix.build(3) { |i, j| m.first_minor(i, j).permanent }
+    assert_equal(expected, dperm)
+
+    perm, dperm = Matrix.build(4) { 1 }.permanent(with_derivative: true)
+    assert_equal(24, perm)
+    assert_equal(Matrix.build(4) { 6 }, dperm)
+
+    r = Matrix[[Rational(1,2), 2], [3, Rational(1,4)]]
+    perm, dperm = r.permanent(with_derivative: true)
+    assert_equal(Rational(49, 8), perm)
+    assert_equal(Matrix[[Rational(1,4), 3], [2, Rational(1,2)]], dperm)
+  end
+
   def test_new_matrix
     assert_raise(TypeError) { Matrix[Object.new] }
     o = Object.new
