@@ -2,6 +2,10 @@
 
 List of new feature changes (excluding most bug fixes and optimizations)
 
+## Unreleased
+
+* Add `Matrix.solve_sylvester`
+
 ## v0.4.0
 
 * Add `Matrix#rotate_entries` [#19]

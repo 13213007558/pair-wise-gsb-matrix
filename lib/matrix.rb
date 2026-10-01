@@ -1570,6 +1570,156 @@ class Matrix
   alias_method :lup_decomposition, :lup
 
   #--
+  # EQUATION SOLVING -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+  #++
+
+  #
+  # Solves the Sylvester equation for +X+:
+  #
+  #   A*X + X*B = C
+  #
+  # where +a+ and +b+ are square matrices (possibly of different sizes)
+  # and +c+ has as many rows as +a+ and as many columns as +b+.
+  #
+  # Returns a Matrix::SylvesterResult:
+  #
+  #   result = Matrix.solve_sylvester(a, b, c)
+  #   result.status             # => :unique, :infinite or :no_solution
+  #   result.solution           # => the unique solution, a particular
+  #                             #    solution, or nil if there is none
+  #   result.homogeneous_basis  # => array of matrices spanning the
+  #                             #    solutions of A*X + X*B = 0
+  #
+  # The equation has a unique solution exactly when +a+ and +-b+ have no
+  # common eigenvalue. When they do, the same +a+ and +b+ may yield
+  # infinitely many solutions or none at all, depending on +c+.
+  #
+  # Arithmetic is exact for exact entries (Integer, Rational, ...);
+  # beware that using Float values can yield erroneous results
+  # because of their lack of precision.
+  #
+  #   a = Matrix[[3, 1], [0, 2]]
+  #   b = Matrix[[1, 0], [-1, 4]]
+  #   c = Matrix[[1, 2], [3, 4]]
+  #   x = Matrix.solve_sylvester(a, b, c).solution
+  #   a*x + x*b == c # => true
+  #
+  def Matrix.solve_sylvester(a, b, c)
+    raise ErrDimensionMismatch, "A must be square" unless a.square?
+    raise ErrDimensionMismatch, "B must be square" unless b.square?
+    m = a.row_count
+    n = b.row_count
+    unless c.row_count == m && c.column_count == n
+      raise ErrDimensionMismatch, "C must be a #{m}x#{n} matrix"
+    end
+
+    size = m * n
+    if size == 0
+      return SylvesterResult.new(:unique, Matrix.empty(m, n), [])
+    end
+
+    # Vectorizing with the column-major convention vec(X)[j*m + i] == X[i, j]
+    # turns the equation into the linear system
+    #   (I_n ⊗ A + Bᵀ ⊗ I_m) vec(X) = vec(C)
+    sys = Array.new(size) do |p|
+      i = p % m
+      j = p / m
+      row = Array.new(size) do |q|
+        k = q % m
+        l = q / m
+        v = j == l ? a[i, k] : 0
+        v += b[l, j] if i == k
+        v
+      end
+      row << c[i, j]
+      row
+    end
+
+    # Gauss-Jordan elimination on the augmented matrix; +quo+ keeps the
+    # arithmetic exact for exact entries.
+    rank = 0
+    pivot_row_of = {} # column index => row index
+    (0...size).each do |col|
+      found = (rank...size).find {|r| sys[r][col] != 0 }
+      next unless found
+      sys[rank], sys[found] = sys[found], sys[rank]
+      pivot_row = sys[rank]
+      divisor = pivot_row[col]
+      pivot_row.map! {|v| v.quo(divisor) } unless divisor == 1
+      size.times do |r|
+        next if r == rank
+        factor = sys[r][col]
+        next if factor == 0
+        row = sys[r]
+        (0..size).each do |k|
+          row[k] -= factor * pivot_row[k]
+        end
+      end
+      pivot_row_of[col] = rank
+      rank += 1
+      break if rank == size
+    end
+
+    to_matrix = lambda do |vec|
+      Matrix.rows(Array.new(m) {|i| Array.new(n) {|j| vec[j*m + i] } })
+    end
+
+    basis = ((0...size).to_a - pivot_row_of.keys).map do |free|
+      vec = Array.new(size, 0)
+      vec[free] = 1
+      pivot_row_of.each {|col, r| vec[col] = -sys[r][free] }
+      to_matrix.call(vec)
+    end
+
+    if (rank...size).any? {|r| sys[r][size] != 0 }
+      SylvesterResult.new(:no_solution, nil, basis)
+    else
+      vec = Array.new(size, 0)
+      pivot_row_of.each {|col, r| vec[col] = sys[r][size] }
+      status = rank == size ? :unique : :infinite
+      SylvesterResult.new(status, to_matrix.call(vec), basis)
+    end
+  end
+
+  #
+  # The result of Matrix.solve_sylvester.
+  #
+  class SylvesterResult
+    # One of :unique, :infinite or :no_solution.
+    attr_reader :status
+
+    # The unique solution when +status+ is :unique, a particular solution
+    # when it is :infinite, and nil when it is :no_solution.
+    attr_reader :solution
+
+    # An array of matrices spanning the solutions of the homogeneous
+    # equation A*X + X*B = 0; empty when the solution is unique.
+    attr_reader :homogeneous_basis
+
+    def initialize(status, solution, homogeneous_basis) # :nodoc:
+      @status = status
+      @solution = solution
+      @homogeneous_basis = homogeneous_basis.freeze
+      freeze
+    end
+
+    # Whether the equation has exactly one solution.
+    def unique?
+      @status == :unique
+    end
+
+    # Whether the equation has infinitely many solutions.
+    def infinite?
+      @status == :infinite
+    end
+
+    # Whether the equation has no solution.
+    def no_solution?
+      @status == :no_solution
+    end
+  end
+
+  #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
   #++
 

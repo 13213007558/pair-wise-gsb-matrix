@@ -502,6 +502,81 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(m.lup.solve([2, 5]), Vector[1, Rational(1,2)])
   end
 
+  def test_solve_sylvester_unique
+    a = Matrix[[3, 1], [0, 2]]
+    b = Matrix[[1, 0], [-1, 4]]
+    c = Matrix[[1, 2], [3, 4]]
+    result = Matrix.solve_sylvester(a, b, c)
+    assert_equal(:unique, result.status)
+    assert(result.unique?)
+    assert(!result.infinite?)
+    assert(!result.no_solution?)
+    assert_equal(a * result.solution + result.solution * b, c)
+    assert_empty(result.homogeneous_basis)
+  end
+
+  def test_solve_sylvester_different_sizes
+    a = Matrix[[2, 1], [0, 3]]
+    b = Matrix[[1, 0, 2], [0, 2, 0], [1, 0, 5]]
+    c = Matrix[[1, 2, 3], [4, 5, 6]]
+    result = Matrix.solve_sylvester(a, b, c)
+    assert_equal(:unique, result.status)
+    assert_equal(a * result.solution + result.solution * b, c)
+  end
+
+  def test_solve_sylvester_rational_exactness
+    a = Matrix[[Rational(1, 2), 0], [0, Rational(1, 3)]]
+    b = Matrix[[Rational(1, 5), 1], [0, Rational(2, 7)]]
+    c = Matrix[[1, 2], [3, 4]]
+    result = Matrix.solve_sylvester(a, b, c)
+    assert_equal(:unique, result.status)
+    assert(result.solution.all? {|e| e.is_a?(Rational) })
+    assert_equal(a * result.solution + result.solution * b, c)
+  end
+
+  def test_solve_sylvester_infinite
+    # A and -B share the eigenvalue 1, and C is in the image of the operator
+    a = Matrix[[1, 0], [0, 2]]
+    b = Matrix[[-1, 0], [0, 3]]
+    c = Matrix[[0, 5], [2, 10]]
+    result = Matrix.solve_sylvester(a, b, c)
+    assert_equal(:infinite, result.status)
+    assert(!result.unique?)
+    assert(result.infinite?)
+    assert(!result.no_solution?)
+    assert_equal(a * result.solution + result.solution * b, c)
+    assert_equal(1, result.homogeneous_basis.size)
+    result.homogeneous_basis.each do |basis_matrix|
+      assert_equal(a * basis_matrix + basis_matrix * b, Matrix.zero(2))
+    end
+  end
+
+  def test_solve_sylvester_no_solution
+    # Same A and B as the infinite case, but C is not in the image
+    a = Matrix[[1, 0], [0, 2]]
+    b = Matrix[[-1, 0], [0, 3]]
+    c = Matrix[[1, 0], [0, 0]]
+    result = Matrix.solve_sylvester(a, b, c)
+    assert_equal(:no_solution, result.status)
+    assert(!result.unique?)
+    assert(!result.infinite?)
+    assert(result.no_solution?)
+    assert_nil(result.solution)
+    assert_equal(1, result.homogeneous_basis.size)
+  end
+
+  def test_solve_sylvester_errors
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) do
+      Matrix.solve_sylvester(Matrix[[1, 2, 3], [4, 5, 6]], Matrix.I(2), Matrix.I(2))
+    end
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) do
+      Matrix.solve_sylvester(Matrix.I(2), Matrix[[1, 2, 3], [4, 5, 6]], Matrix.I(2))
+    end
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) do
+      Matrix.solve_sylvester(Matrix.I(2), Matrix.I(2), Matrix.I(3))
+    end
+  end
+
   def test_real
     assert_equal(Matrix[[1, 0, 0], [1, 2, 3]], @c1.real)
   end
