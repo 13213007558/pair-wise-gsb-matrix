@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :UpdatableQRDecomposition, "matrix/updatable_qr_decomposition"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1569,15 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  # Returns an updatable rank-revealing QR decomposition for this matrix and,
+  # optionally, one or more right hand side columns.  See
+  # UpdatableQRDecomposition for the supported row operations, rank rules,
+  # and refactorization policy.
+  def updatable_qr(rhs = nil, **options)
+    UpdatableQRDecomposition.new(self, rhs, **options)
+  end
+  alias_method :updatable_qr_decomposition, :updatable_qr
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
