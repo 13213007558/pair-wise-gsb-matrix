@@ -502,6 +502,105 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(m.lup.solve([2, 5]), Vector[1, Rational(1,2)])
   end
 
+  def test_symmetric_ldl_with_two_by_two_pivot
+    m = Matrix[[0, 1], [1, 0]]
+    f = m.symmetric_ldl
+    p, l, d = f
+
+    assert_equal(Matrix.identity(2), p)
+    assert_equal(Matrix.identity(2), l)
+    assert_equal(m, d)
+    assert_equal([2], f.block_sizes)
+    assert_equal([1, 1, 0], f.inertia)
+    assert_equal(2, f.rank)
+    assert_equal(false, f.singular?)
+    assert_equal(Matrix.empty(2, 0), f.nullspace)
+    assert_equal(l * d * l.transpose, p * m * p.transpose)
+    assert_equal(m, p.transpose * l * d * l.transpose * p)
+  end
+
+  def test_symmetric_ldl_rank_deficient_zero_diagonal
+    m = Matrix[[0, 0, 1], [0, 0, 0], [1, 0, 0]]
+    f = m.symmetric_ldl
+    p, l, d = f
+    expected_d = Matrix[[0, 1, 0], [1, 0, 0], [0, 0, 0]]
+
+    assert_equal([2], f.block_sizes)
+    assert_equal([1, 1, 1], f.inertia)
+    assert_equal(2, f.rank)
+    assert_equal(true, f.singular?)
+    assert_equal(expected_d, d)
+    assert_equal(Matrix.columns([[0, 1, 0]]), f.nullspace)
+    assert_equal(l * d * l.transpose, p * m * p.transpose)
+    assert_equal(m, p.transpose * l * d * l.transpose * p)
+    assert((m * f.nullspace).zero?)
+  end
+
+  def test_symmetric_ldl_rational_and_exact_factors
+    m = Matrix[[0, Rational(1, 2)], [Rational(1, 2), 0]]
+    f = m.symmetric_ldl
+    p, l, d = f
+
+    assert_equal(m, d)
+    assert_equal([1, 1, 0], f.inertia)
+    assert_equal(m, p.transpose * l * d * l.transpose * p)
+    [p, l, d].each do |factor|
+      assert(factor.all? {|entry| entry.is_a?(Integer) || entry.is_a?(Rational)})
+    end
+  end
+
+  def test_symmetric_ldl_inertia_under_random_invertible_congruence
+    random = Random.new(1234)
+    a = Matrix[
+      [0, 1, 0, 0, 0],
+      [1, 0, 0, 0, 0],
+      [0, 0, 0, 2, 0],
+      [0, 0, 2, 1, 0],
+      [0, 0, 0, 0, 0]
+    ]
+
+    5.times do
+      q = Matrix.build(5) do |row, column|
+        if column == row
+          1
+        elsif column < row
+          random.rand(-3..3)
+        else
+          0
+        end
+      end
+      congruent = q.transpose * a * q
+      original = a.symmetric_ldl
+      transformed = congruent.symmetric_ldl
+
+      assert_equal(original.inertia, transformed.inertia)
+      assert_equal(original.rank, transformed.rank)
+      assert_equal(2, transformed.positive_count)
+      assert_equal(2, transformed.negative_count)
+      assert_equal(1, transformed.zero_count)
+
+      p, l, d = transformed
+      assert_equal(l * d * l.transpose, p * congruent * p.transpose)
+      assert_equal(congruent, p.transpose * l * d * l.transpose * p)
+      assert((congruent * transformed.nullspace).zero?)
+      [p, l, d].each do |factor|
+        assert(factor.all? {|entry| entry.is_a?(Integer) || entry.is_a?(Rational)})
+      end
+    end
+  end
+
+  def test_symmetric_ldl_validates_input
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix[[1, 2], [3, 4], [5, 6]].symmetric_ldl
+    end
+    assert_raise(ArgumentError) do
+      Matrix[[1, 2], [3, 4]].symmetric_ldl
+    end
+    assert_raise(TypeError) do
+      Matrix[[0.0, 1], [1, 0]].symmetric_ldl
+    end
+  end
+
   def test_real
     assert_equal(Matrix[[1, 0, 0], [1, 2, 3]], @c1.real)
   end

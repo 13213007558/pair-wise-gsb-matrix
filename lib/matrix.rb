@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :SymmetricLDLDecomposition, "matrix/symmetric_ldl_decomposition"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1569,20 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the exact symmetric block LDL decomposition of the matrix;
+  # see +SymmetricLDLDecomposition+. The matrix must be symmetric and contain
+  # only +Integer+ or +Rational+ entries.
+  #   p, l, d = Matrix[[0, 1], [1, 0]].symmetric_ldl
+  #   p.permutation?      # => true
+  #   l.lower_triangular? # => true
+  #   p * self * p.t == l * d * l.t # => true
+  #
+  def symmetric_ldl
+    SymmetricLDLDecomposition.new(self)
+  end
+  alias_method :symmetric_ldl_decomposition, :symmetric_ldl
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
