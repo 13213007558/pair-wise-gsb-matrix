@@ -15,6 +15,12 @@
 require_relative "matrix/version"
 
 module ExceptionForMatrix # :nodoc:
+  class ErrNotSymmetric < StandardError
+    def initialize(val = nil)
+      super(val || "Matrix is not symmetric")
+    end
+  end
+
   class ErrDimensionMismatch < StandardError
     def initialize(val = nil)
       if val
@@ -63,6 +69,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :SymmetricLDLDecomposition, "matrix/symmetric_ldl_decomposition"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1575,23 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the exact symmetric LDL decomposition of the matrix; see
+  # +SymmetricLDLDecomposition+. Integer and Rational entries are supported.
+  #
+  # The returned factors satisfy
+  # <tt>p * a * p.transpose == l * d * l.transpose</tt>.
+  #
+  #   a = Matrix[[0, 1], [1, 0]]
+  #   p, l, d = a.symmetric_ldl
+  #   p * a * p.transpose == l * d * l.transpose # => true
+  #   a.symmetric_ldl.inertia # => {positive: 1, negative: 1, zero: 0}
+  #
+  def symmetric_ldl
+    SymmetricLDLDecomposition.new(self)
+  end
+  alias_method :symmetric_ldl_decomposition, :symmetric_ldl
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
