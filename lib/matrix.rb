@@ -50,6 +50,16 @@ module ExceptionForMatrix # :nodoc:
       super("Sorry, Operation(#{vals[0]}) not implemented: #{vals[1]} op #{vals[2]}")
     end
   end
+
+  class ErrNotDoublyStochastic < StandardError
+    def initialize(val = nil)
+      if val
+        super(val)
+      else
+        super("Matrix is not doubly stochastic")
+      end
+    end
+  end
 end
 
 #
@@ -63,6 +73,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :BirkhoffDecomposition, "matrix/birkhoff_decomposition"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1579,19 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the Birkhoff–von Neumann decomposition of a doubly stochastic
+  # matrix; see +BirkhoffDecomposition+.
+  #   m = Matrix[[Rational(1, 2), Rational(1, 2)],
+  #              [Rational(1, 2), Rational(1, 2)]]
+  #   m.birkhoff_von_neumann.to_a
+  #   # => [[[1, 0], (1/2)], [[0, 1], (1/2)]]
+  #
+  def birkhoff_von_neumann
+    BirkhoffDecomposition.new(self)
+  end
+  alias_method :birkhoff, :birkhoff_von_neumann
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=

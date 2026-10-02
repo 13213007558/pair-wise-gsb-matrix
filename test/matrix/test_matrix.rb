@@ -819,6 +819,116 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(Matrix.empty(0,2), @e1.adjoint)
   end
 
+  def assert_birkhoff_decomposition(m)
+    n = m.row_count
+    decomposition = m.birkhoff_von_neumann
+    pairs = decomposition.to_a
+    assert_equal(decomposition.permutations, pairs.map(&:first))
+    assert_equal(decomposition.weights, pairs.map(&:last))
+    total_weight = Rational(0)
+    sum = Array.new(n) { Array.new(n, Rational(0)) }
+    pairs.each do |permutation, weight|
+      assert_kind_of(Rational, weight)
+      assert_operator(weight, :>, 0)
+      assert_equal((0...n).to_a, permutation.sort)
+      total_weight += weight
+      n.times do |i|
+        assert_operator(m[i, permutation[i]], :>, 0)
+        sum[i][permutation[i]] += weight
+      end
+    end
+    assert_equal(Rational(1), total_weight)
+    assert_equal(m.to_a, sum)
+  end
+
+  def test_birkhoff_von_neumann_identity
+    assert_equal([[[0, 1, 2], Rational(1)]], Matrix.identity(3).birkhoff_von_neumann.to_a)
+  end
+
+  def test_birkhoff_von_neumann_singleton
+    assert_equal([[[0], Rational(1)]], Matrix[[Rational(1)]].birkhoff_von_neumann.to_a)
+  end
+
+  def test_birkhoff_von_neumann_empty
+    assert_equal([], Matrix.zero(0).birkhoff_von_neumann.to_a)
+  end
+
+  def test_birkhoff_von_neumann_uniform
+    h = Rational(1, 2)
+    m = Matrix[[h, h], [h, h]]
+    assert_equal([[[1, 0], h], [[0, 1], h]], m.birkhoff_von_neumann.to_a)
+    assert_equal(m.birkhoff_von_neumann.to_a, m.birkhoff.to_a)
+  end
+
+  def test_birkhoff_von_neumann_sparse
+    h = Rational(1, 2)
+    m = Matrix[[h, h, 0], [h, 0, h], [0, h, h]]
+    assert_birkhoff_decomposition(m)
+  end
+
+  def test_birkhoff_von_neumann_repeated_blocks
+    h = Rational(1, 2)
+    m = Matrix[[h, h, 0, 0], [h, h, 0, 0], [0, 0, h, h], [0, 0, h, h]]
+    assert_birkhoff_decomposition(m)
+  end
+
+  def test_birkhoff_von_neumann_circulant
+    m = Matrix[[Rational(1, 2), Rational(1, 3), Rational(1, 6)],
+               [Rational(1, 6), Rational(1, 2), Rational(1, 3)],
+               [Rational(1, 3), Rational(1, 6), Rational(1, 2)]]
+    assert_birkhoff_decomposition(m)
+  end
+
+  def test_birkhoff_von_neumann_larger
+    m = Matrix[[Rational(1, 2), Rational(1, 4), Rational(1, 4), 0],
+               [Rational(1, 4), Rational(1, 2), 0, Rational(1, 4)],
+               [Rational(1, 4), 0, Rational(1, 2), Rational(1, 4)],
+               [0, Rational(1, 4), Rational(1, 4), Rational(1, 2)]]
+    assert_birkhoff_decomposition(m)
+  end
+
+  def test_birkhoff_von_neumann_enumerable
+    h = Rational(1, 2)
+    decomposition = Matrix[[h, h], [h, h]].birkhoff_von_neumann
+    assert_equal(2, decomposition.count)
+    assert_equal([[[1, 0], h], [[0, 1], h]], decomposition.map { |p, w| [p, w] })
+  end
+
+  def test_birkhoff_von_neumann_not_square
+    assert_raise(Matrix::ErrDimensionMismatch) do
+      Matrix[[Rational(1), Rational(0)]].birkhoff_von_neumann
+    end
+  end
+
+  def test_birkhoff_von_neumann_bad_row_sum
+    m = Matrix[[Rational(2), Rational(0)], [Rational(0), Rational(1)]]
+    e = assert_raise(Matrix::ErrNotDoublyStochastic) { m.birkhoff_von_neumann }
+    assert_include(e.message, "row 0")
+  end
+
+  def test_birkhoff_von_neumann_bad_column_sum
+    m = Matrix[[Rational(1, 2), Rational(1, 2)], [Rational(1, 4), Rational(3, 4)]]
+    e = assert_raise(Matrix::ErrNotDoublyStochastic) { m.birkhoff_von_neumann }
+    assert_include(e.message, "column 0")
+  end
+
+  def test_birkhoff_von_neumann_zero_matrix
+    e = assert_raise(Matrix::ErrNotDoublyStochastic) { Matrix.zero(2).birkhoff_von_neumann }
+    assert_include(e.message, "row 0")
+  end
+
+  def test_birkhoff_von_neumann_negative_entry
+    m = Matrix[[Rational(3, 2), Rational(-1, 2)], [Rational(-1, 2), Rational(3, 2)]]
+    e = assert_raise(Matrix::ErrNotDoublyStochastic) { m.birkhoff_von_neumann }
+    assert_include(e.message, "(0, 1)")
+  end
+
+  def test_birkhoff_von_neumann_inexact_entry
+    m = Matrix[[0.5, 0.5], [0.5, 0.5]]
+    e = assert_raise(Matrix::ErrNotDoublyStochastic) { m.birkhoff_von_neumann }
+    assert_include(e.message, "(0, 0)")
+  end
+
   def test_ractor
     assert_ractor(<<~RUBY, require: 'matrix')
       class Ractor
