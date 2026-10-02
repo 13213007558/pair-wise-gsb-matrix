@@ -502,6 +502,104 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(m.lup.solve([2, 5]), Vector[1, Rational(1,2)])
   end
 
+  def assert_birkhoff_decomposition(m, decomposition)
+    assert_not_empty(decomposition)
+    weights = decomposition.map(&:last)
+    assert(weights.all? {|w| w.is_a?(Rational) || w.is_a?(Integer) })
+    assert(weights.all? {|w| w > 0 })
+    assert_equal(1, weights.sum)
+    decomposition.each do |permutation, _|
+      assert(permutation.permutation?)
+      m.each_with_index do |e, i, j|
+        assert_equal(0, permutation[i, j], "permutation uses zero entry at row #{i}, column #{j}") if e.zero?
+      end
+    end
+    assert_equal(m, decomposition.map {|permutation, weight| permutation * weight }.reduce(:+))
+  end
+
+  def test_birkhoff_von_neumann
+    m = Matrix[[Rational(1, 2), Rational(1, 2)], [Rational(1, 2), Rational(1, 2)]]
+    assert_equal(
+      [[Matrix[[0, 1], [1, 0]], Rational(1, 2)], [Matrix[[1, 0], [0, 1]], Rational(1, 2)]],
+      m.birkhoff_von_neumann
+    )
+    assert_birkhoff_decomposition(m, m.birkhoff_von_neumann)
+  end
+
+  def test_birkhoff_von_neumann_alias
+    m = Matrix[[Rational(1, 2), Rational(1, 2)], [Rational(1, 2), Rational(1, 2)]]
+    assert_equal(m.birkhoff_von_neumann, m.birkhoff_von_neumann_decomposition)
+  end
+
+  def test_birkhoff_von_neumann_single_entry
+    assert_equal([[Matrix[[1]], 1]], Matrix[[1]].birkhoff_von_neumann)
+  end
+
+  def test_birkhoff_von_neumann_permutation
+    m = Matrix[[0, 1, 0], [0, 0, 1], [1, 0, 0]]
+    assert_equal([[m, 1]], m.birkhoff_von_neumann)
+  end
+
+  def test_birkhoff_von_neumann_sparse
+    m = Matrix[
+      [Rational(1, 2), 0, Rational(1, 2)],
+      [0, 1, 0],
+      [Rational(1, 2), 0, Rational(1, 2)],
+    ]
+    assert_birkhoff_decomposition(m, m.birkhoff_von_neumann)
+  end
+
+  def test_birkhoff_von_neumann_repeated_blocks
+    block = [[Rational(1, 3), Rational(2, 3)], [Rational(2, 3), Rational(1, 3)]]
+    m = Matrix.rows(block.map {|row| row + [0, 0] } + block.map {|row| [0, 0] + row })
+    assert_birkhoff_decomposition(m, m.birkhoff_von_neumann)
+  end
+
+  def test_birkhoff_von_neumann_larger
+    m = Matrix[
+      [Rational(1, 4), Rational(1, 4), Rational(1, 4), Rational(1, 4)],
+      [Rational(1, 2), Rational(1, 6), 0, Rational(1, 3)],
+      [Rational(1, 12), Rational(1, 3), Rational(7, 12), 0],
+      [Rational(1, 6), Rational(1, 4), Rational(1, 6), Rational(5, 12)],
+    ]
+    decomposition = m.birkhoff_von_neumann
+    assert_birkhoff_decomposition(m, decomposition)
+    assert(decomposition.size <= 4 * 4)
+  end
+
+  def test_birkhoff_von_neumann_not_square
+    assert_raise(Matrix::ErrDimensionMismatch) { @m1.birkhoff_von_neumann }
+  end
+
+  def test_birkhoff_von_neumann_empty
+    error = assert_raise(ArgumentError) { Matrix.empty(0, 0).birkhoff_von_neumann }
+    assert_match(/empty/, error.message)
+  end
+
+  def test_birkhoff_von_neumann_negative_entry
+    m = Matrix[[Rational(3, 2), Rational(-1, 2)], [Rational(-1, 2), Rational(3, 2)]]
+    error = assert_raise(ArgumentError) { m.birkhoff_von_neumann }
+    assert_match(/row 0, column 1/, error.message)
+  end
+
+  def test_birkhoff_von_neumann_bad_row_sum
+    m = Matrix[[Rational(1, 2), Rational(1, 2)], [Rational(1, 3), Rational(1, 3)]]
+    error = assert_raise(ArgumentError) { m.birkhoff_von_neumann }
+    assert_match(/row 1/, error.message)
+  end
+
+  def test_birkhoff_von_neumann_bad_column_sum
+    m = Matrix[[Rational(1, 2), Rational(1, 2)], [Rational(1, 4), Rational(3, 4)]]
+    error = assert_raise(ArgumentError) { m.birkhoff_von_neumann }
+    assert_match(/column 0/, error.message)
+  end
+
+  def test_birkhoff_von_neumann_non_exact_entry
+    m = Matrix[[0.5, 0.5], [0.5, 0.5]]
+    error = assert_raise(TypeError) { m.birkhoff_von_neumann }
+    assert_match(/row 0, column 0/, error.message)
+  end
+
   def test_real
     assert_equal(Matrix[[1, 0, 0], [1, 2, 3]], @c1.real)
   end

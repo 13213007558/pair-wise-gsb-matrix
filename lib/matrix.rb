@@ -1569,6 +1569,98 @@ class Matrix
   end
   alias_method :lup_decomposition, :lup
 
+  #
+  # Returns the Birkhoff-von Neumann decomposition of the matrix as an
+  # Array of <code>[permutation_matrix, weight]</code> pairs.
+  #
+  # The matrix must be square and doubly stochastic: entries must be
+  # non-negative Integer or Rational, and every row and column must sum
+  # to exactly 1. Each weight is positive, the weights sum to exactly 1,
+  # and the weighted sum of the permutation matrices reproduces the
+  # matrix exactly:
+  #   m = Matrix[[Rational(1, 2), Rational(1, 2)],
+  #              [Rational(1, 2), Rational(1, 2)]]
+  #   m.birkhoff_von_neumann
+  #   # => [[Matrix[[1, 0], [0, 1]], (1/2)], [Matrix[[0, 1], [1, 0]], (1/2)]]
+  #   m.birkhoff_von_neumann.map {|p, w| p * w }.reduce(:+) == m # => true
+  #
+  # No permutation of the decomposition ever uses a zero entry of the
+  # matrix. The decomposition is computed by repeatedly extracting a
+  # perfect matching of the support, without enumerating all n!
+  # permutations.
+  #
+  # Raises an error indicating the offending position if the matrix is
+  # not doubly stochastic; the matrix is never normalized implicitly.
+  #
+  def birkhoff_von_neumann
+    raise ErrDimensionMismatch, "matrix is not square" unless square?
+    raise ArgumentError, "matrix is empty" if empty?
+    n = row_count
+    column_sums = Array.new(n, 0)
+    n.times do |i|
+      row_sum = 0
+      n.times do |j|
+        e = @rows[i][j]
+        unless e.is_a?(Integer) || e.is_a?(Rational)
+          raise TypeError, "entry at row #{i}, column #{j} must be an Integer or Rational, got #{e.class}"
+        end
+        raise ArgumentError, "negative entry #{e} at row #{i}, column #{j}" if e < 0
+        row_sum += e
+        column_sums[j] += e
+      end
+      raise ArgumentError, "row #{i} sums to #{row_sum}, expected 1" unless row_sum == 1
+    end
+    column_sums.each_with_index do |sum, j|
+      raise ArgumentError, "column #{j} sums to #{sum}, expected 1" unless sum == 1
+    end
+
+    remaining = @rows.map(&:dup)
+    decomposition = []
+    loop do
+      matching = birkhoff_matching(remaining)
+      weight = matching.each_with_index.map {|j, i| remaining[i][j] }.min
+      permutation = Array.new(n) do |i|
+        row = Array.new(n, 0)
+        row[matching[i]] = 1
+        row
+      end
+      decomposition << [Matrix.rows(permutation), weight]
+      n.times {|i| remaining[i][matching[i]] -= weight }
+      break if remaining.all? {|row| row.all?(&:zero?) }
+    end
+    decomposition
+  end
+  alias_method :birkhoff_von_neumann_decomposition, :birkhoff_von_neumann
+
+  # Returns a permutation (as an Array of column indices, one per row)
+  # using only non-zero entries of the given Array of Arrays.
+  private def birkhoff_matching(rows) # :nodoc:
+    n = rows.size
+    match_for_row = Array.new(n, -1)
+    match_for_column = Array.new(n, -1)
+    n.times do |i|
+      visited = Array.new(n, false)
+      unless birkhoff_augment(rows, i, visited, match_for_row, match_for_column)
+        raise ErrNotRegular, "support of the matrix has no perfect matching"
+      end
+    end
+    match_for_row
+  end
+
+  private def birkhoff_augment(rows, i, visited, match_for_row, match_for_column) # :nodoc:
+    rows.size.times do |j|
+      next if rows[i][j].zero? || visited[j]
+      visited[j] = true
+      k = match_for_column[j]
+      if k < 0 || birkhoff_augment(rows, k, visited, match_for_row, match_for_column)
+        match_for_row[i] = j
+        match_for_column[j] = i
+        return true
+      end
+    end
+    false
+  end
+
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
   #++
