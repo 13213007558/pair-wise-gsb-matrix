@@ -774,6 +774,89 @@ class TestMatrix < Test::Unit::TestCase
     assert !m.respond_to?(:foo)
   end
 
+  def test_rational_canonical_form
+    cases = {
+      Matrix.empty => [],
+      Matrix[[5]] => [[-5, 1]],
+      Matrix.zero(3) => [[0, 1], [0, 1], [0, 1]],
+      Matrix[[0, 1, 0], [0, 0, 1], [0, 0, 0]] => [[0, 0, 0, 1]],
+      Matrix[[2, 1, 0, 0], [0, 2, 0, 0], [0, 0, 2, 1], [0, 0, 0, 2]] =>
+        [[4, -4, 1], [4, -4, 1]],
+      Matrix[[0, 2], [1, 0]] => [[-2, 0, 1]],
+      Matrix[[Rational(1, 2), Rational(1, 3)], [0, Rational(-1, 4)]] =>
+        [[Rational(-1, 8), Rational(-1, 4), 1]],
+    }
+
+    cases.each do |matrix, expected_factors|
+      decomposition = matrix.rational_canonical_form
+      blocks, p, factors = decomposition
+      f = decomposition.frobenius_matrix
+
+      assert_equal expected_factors, factors
+      assert_equal Matrix::RationalCanonicalForm.block_diagonal(blocks), f
+      assert_equal matrix * p, p * f
+      assert_not_equal 0, p.determinant if p.row_count.nonzero?
+
+      factors.each do |factor|
+        assert_equal 1, factor.last
+        factor[0...-1].each do |coefficient|
+          assert(coefficient.is_a?(Integer) || coefficient.is_a?(Rational))
+        end
+      end
+
+      f.each(:all) { |entry| assert(entry.is_a?(Integer) || entry.is_a?(Rational)) }
+      p.each(:all) { |entry| assert(entry.is_a?(Integer) || entry.is_a?(Rational)) }
+
+      factors.each_cons(2) do |left, right|
+        assert(polynomial_remainder(right, left).all?(&:zero?))
+      end
+    end
+  end
+
+  def test_rational_canonical_form_distinguishes_same_characteristic_polynomial
+    jordan_block = Matrix[[0, 1, 0], [0, 0, 0], [0, 0, 0]]
+    zero_matrix = Matrix.zero(3)
+
+    [-2, 0, 3, 5].each do |scalar|
+      assert_equal((scalar * Matrix.identity(3) - jordan_block).determinant,
+                   (scalar * Matrix.identity(3) - zero_matrix).determinant)
+    end
+
+    jordan_decomposition = jordan_block.rational_canonical_form
+    zero_decomposition = zero_matrix.rational_canonical_form
+
+    assert_equal [[0, 1], [0, 0, 1]], jordan_decomposition.invariant_factors
+    assert_equal [[0, 1], [0, 1], [0, 1]], zero_decomposition.invariant_factors
+    assert_not_equal jordan_decomposition.invariant_factors,
+                     zero_decomposition.invariant_factors
+    assert_not_equal jordan_decomposition.frobenius_matrix,
+                     zero_decomposition.frobenius_matrix
+
+    assert_equal jordan_block * jordan_decomposition.p,
+                 jordan_decomposition.p * jordan_decomposition.frobenius_matrix
+    assert_equal zero_matrix * zero_decomposition.p,
+                 zero_decomposition.p * zero_decomposition.frobenius_matrix
+  end
+
+  def test_rational_canonical_form_requires_exact_rational_entries
+    assert_raise(TypeError) { Matrix[[1.0]].rational_canonical_form }
+    assert_raise(TypeError) { Matrix[[Complex(1, 0)]].rational_canonical_form }
+    assert_raise(Matrix::ErrDimensionMismatch) { @m1.rational_canonical_form }
+  end
+
+  def polynomial_remainder(dividend, divisor)
+    remainder = dividend.dup
+
+    (dividend.size - divisor.size).downto(0) do |degree|
+      factor = remainder[degree + divisor.size - 1] / divisor.last
+      divisor.each_with_index do |coefficient, power|
+        remainder[degree + power] -= factor * coefficient
+      end
+    end
+
+    remainder.first(divisor.size - 1)
+  end
+
   def test_eigenvalues_and_eigenvectors_symmetric
     m = Matrix[
       [8, 1],

@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :RationalCanonicalForm, "matrix/rational_canonical_form"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1569,23 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the rational canonical form (Frobenius normal form) over Rational.
+  # The matrix must contain Integer or Rational entries.
+  #
+  # The result contains the Frobenius companion blocks, an invertible matrix +P+,
+  # and monic invariant factors ordered so that each divides the next.
+  # Each invariant factor is represented by Rational coefficients from constant
+  # term to leading coefficient. Blocks are returned in the same order.
+  # The identity +A * P = P * F+ holds exactly, where +F+ is the block diagonal
+  # formed from the blocks.
+  #
+  def rational_canonical_form
+    RationalCanonicalForm.new(self)
+  end
+  alias_method :rational_canonical, :rational_canonical_form
+  alias_method :frobenius_form, :rational_canonical_form
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
