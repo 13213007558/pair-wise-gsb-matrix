@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :RationalCanonicalForm, "matrix/rational_canonical_form"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1569,22 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the rational canonical (Frobenius) form of the matrix;
+  # see +RationalCanonicalForm+.
+  #   m = Matrix[[0, 2], [1, 0]]
+  #   rcf = m.rational_canonical_form
+  #   rcf.invariant_factors # => [[-2, 0, 1]]
+  #   rcf.blocks            # => [Matrix[[0, 2], [1, 0]]]
+  #   m * rcf.basis == rcf.basis * rcf.frobenius_form # => true
+  #
+  # The computation is exact (no floating point), so the matrix must have
+  # Integer or Rational entries.
+  #
+  def rational_canonical_form
+    RationalCanonicalForm.new(self)
+  end
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=

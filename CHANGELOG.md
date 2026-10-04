@@ -2,6 +2,12 @@
 
 List of new feature changes (excluding most bug fixes and optimizations)
 
+## Unreleased
+
+* Add `Matrix#rational_canonical_form` (exact Frobenius normal form over
+  the rationals: Frobenius blocks, invertible change-of-basis matrix and
+  invariant factors)
+
 ## v0.4.0
 
 * Add `Matrix#rotate_entries` [#19]
