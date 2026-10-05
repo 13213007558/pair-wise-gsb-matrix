@@ -502,6 +502,78 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(m.lup.solve([2, 5]), Vector[1, Rational(1,2)])
   end
 
+  def test_principal_logarithm_jordan_near_identity
+    m = Matrix[[1, 1e-8], [0, 1]]
+    result = m.principal_logarithm(1e-12, diagnostics: true)
+
+    assert_in_epsilon(0, result.logarithm[0, 0], 1e-14)
+    assert_in_epsilon(1e-8, result.logarithm[0, 1], 1e-14)
+    assert_in_epsilon(0, result.logarithm[1, 1], 1e-14)
+    assert result.relative_residual < 1e-12
+  end
+
+  def test_principal_logarithm_large_nilpotent_part
+    m = Matrix[[1, 1e6], [0, 1]]
+    result = m.principal_logarithm(1e-12, diagnostics: true)
+
+    assert_in_epsilon(1e6, result.logarithm[0, 1], 1e-14)
+    assert result.relative_residual < 1e-12
+  end
+
+  def test_principal_logarithm_strongly_nonnormal_triangular
+    m = Matrix[[2, 1_000_000], [0, Rational(1, 2)]]
+    result = m.principal_logarithm(1e-12, diagnostics: true)
+
+    assert_in_epsilon(Math.log(2), result.logarithm[0, 0], 1e-14)
+    assert_in_epsilon(Math.log(Rational(1, 2)), result.logarithm[1, 1], 1e-14)
+    assert result.relative_residual < 1e-12
+  end
+
+  def test_principal_logarithm_small_eigenvalue_jordan
+    m = Matrix[[Rational(1, 100), 1e8], [0, Rational(1, 100)]]
+    result = m.principal_logarithm(1e-12, diagnostics: true)
+
+    assert_in_epsilon(1e10, result.logarithm[0, 1], 1e-12)
+    assert result.relative_residual < 1e-12
+  end
+
+  def test_principal_logarithm_complex_spectrum_is_real
+    m = Matrix[[0, -1], [1, 0]]
+    result = m.principal_logarithm(1e-12, diagnostics: true)
+
+    assert(result.logarithm.to_a.all? { |row| row.all?(&:real?) })
+    assert_in_epsilon(Math::PI / 2, result.logarithm[1, 0], 1e-14)
+    assert_in_epsilon(-Math::PI / 2, result.logarithm[0, 1], 1e-14)
+    assert result.relative_residual < 1e-12
+  end
+
+  def test_principal_logarithm_complex_block_with_strong_coupling
+    m = Matrix[[0, -1, 1_000_000], [1, 0, -1_000_000], [0, 0, 2]]
+    result = m.principal_logarithm(1e-10, diagnostics: true)
+
+    assert(result.logarithm.to_a.all? { |row| row.all?(&:real?) })
+    assert result.relative_residual < 1e-10
+  end
+
+  def test_principal_logarithm_rejects_branch_cut
+    assert_raise(Matrix::ErrPrincipalLogarithm) { Matrix[[-1, 1], [0, -1]].principal_logarithm }
+    assert_raise(Matrix::ErrPrincipalLogarithm) { Matrix[[0, 1], [0, 1]].principal_logarithm }
+  end
+
+  def test_principal_logarithm_precision_and_default_return
+    m = Matrix[[2, 0], [0, 3]]
+    logarithm = m.principal_logarithm(1e-10)
+
+    assert_kind_of(Matrix, logarithm)
+    assert_raise(Matrix::ErrPrincipalLogarithm) { m.principal_logarithm(1e-30) }
+  end
+
+  def test_principal_logarithm_validates_shape_type_and_precision
+    assert_raise(Matrix::ErrPrincipalLogarithm) { @m1.principal_logarithm }
+    assert_raise(Matrix::ErrPrincipalLogarithm) { Matrix[[Complex(1, 1)]].principal_logarithm }
+    assert_raise(ArgumentError) { Matrix[[1]].principal_logarithm(0) }
+  end
+
   def test_real
     assert_equal(Matrix[[1, 0, 0], [1, 2, 3]], @c1.real)
   end

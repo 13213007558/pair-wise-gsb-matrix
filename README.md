@@ -30,6 +30,17 @@ m = Matrix[[1, 2], [3, 4]]
 m.determinant # => -2
 ```
 
+### Principal logarithm
+
+```ruby
+a = Matrix[[1, 1e-8], [0, 1]]
+result = a.principal_logarithm(1e-12, diagnostics: true)
+result.logarithm
+result.relative_residual
+```
+
+Matrices with zero or negative-real eigenvalues are rejected because no real principal logarithm exists for them.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.

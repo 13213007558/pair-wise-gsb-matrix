@@ -50,6 +50,8 @@ module ExceptionForMatrix # :nodoc:
       super("Sorry, Operation(#{vals[0]}) not implemented: #{vals[1]} op #{vals[2]}")
     end
   end
+  class ErrPrincipalLogarithm < StandardError
+  end
 end
 
 #
@@ -63,6 +65,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :PrincipalLogarithm, "matrix/principal_logarithm"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1571,19 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the real principal logarithm of a real square matrix.
+  #
+  # The spectrum must contain neither zero nor negative real values.  The
+  # +precision+ is checked against the relative Frobenius residual
+  # <tt>exp(logarithm) - self</tt>.  Pass +diagnostics: true+ to receive a
+  # +Matrix::PrincipalLogarithm::Result+ with residual information.
+  #
+  def principal_logarithm(precision = Float::EPSILON, diagnostics: false)
+    PrincipalLogarithm.compute(self, precision, diagnostics)
+  end
+  alias_method :principal_log, :principal_logarithm
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=

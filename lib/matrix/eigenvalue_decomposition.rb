@@ -17,7 +17,7 @@ class Matrix
 
     # Constructs the eigenvalue decomposition for a square matrix +A+
     #
-    def initialize(a)
+    def initialize(a, build_vectors = true)
       # @d, @e: Arrays for internal storage of eigenvalues.
       # @v: Array for internal storage of eigenvectors.
       # @h: Array for internal storage of nonsymmetric Hessenberg form.
@@ -25,18 +25,31 @@ class Matrix
       @size = a.row_count
       @d = Array.new(@size, 0)
       @e = Array.new(@size, 0)
+      @build_vectors = build_vectors
 
       if (@symmetric = a.symmetric?)
         @v = a.to_a
         tridiagonalize
         diagonalize
+        @schur = Array.new(@size) { |i| Array.new(@size) { |j| i == j ? @d[i] : 0.0 } }
+        @schur_vectors = @v.map(&:dup)
       else
         @v = Array.new(@size) { Array.new(@size, 0) }
         @h = a.to_a
         @ort = Array.new(@size, 0)
         reduce_to_hessenberg
         hessenberg_to_real_schur
+        @schur = @h.map(&:dup)
+        @schur_vectors = @v.map(&:dup)
       end
+    end
+
+    def schur_matrix
+      Matrix.send(:new, @schur.map(&:dup))
+    end
+
+    def schur_vectors
+      Matrix.send(:new, @schur_vectors.map(&:dup))
     end
 
     # Returns the eigenvector matrix +V+
@@ -722,11 +735,13 @@ class Matrix
         end  # check convergence
       end  # while (n >= low)
 
+      @schur = @h.map(&:dup)
+      @schur_vectors = @v.map(&:dup)
+      return unless @build_vectors
+
       # Backsubstitute to find vectors of upper triangular form
 
-      if (norm == 0.0)
-        return
-      end
+      return if norm == 0.0
 
       (nn-1).downto(0) do |k|
         p = @d[k]
