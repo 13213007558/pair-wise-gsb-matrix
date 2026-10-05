@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :PrincipalLog, "matrix/principal_log"
 
   # instance creations
   private_class_method :new
@@ -1494,6 +1495,24 @@ class Matrix
   def round(ndigits=0)
     map{|e| e.round(ndigits)}
   end
+
+  #
+  # Returns the principal logarithm of a real square matrix. The spectrum must
+  # not contain zero or the negative real axis. Complex conjugate eigenvalue
+  # pairs are handled in real arithmetic, and the returned matrix is real.
+  #
+  # +precision+ bounds the relative residual norm
+  # <tt>exp(result) - self</tt>. Pass +diagnostics: true to receive the matrix
+  # together with the achieved residual and scaling information.
+  #
+  #   Matrix[[0, -1], [1, 0]].principal_log.round(10)
+  #   # => Matrix[[0, -(Math::PI/2).round(10)], [(Math::PI/2).round(10), 0]]
+  #
+  def principal_log(precision: 1e-12, diagnostics: false)
+    raise ErrDimensionMismatch unless square?
+    PrincipalLog.new(self, precision, diagnostics).result
+  end
+  alias_method :principal_logarithm, :principal_log
 
   #
   # Returns the trace (sum of diagonal elements) of the matrix.

@@ -800,6 +800,111 @@ class TestMatrix < Test::Unit::TestCase
     assert_in_epsilon(-4 * vectors[1][0], vectors[1][1])
   end
 
+  def test_principal_log_jordan_near_identity
+    matrix = Matrix[[1.0, 1e-10], [0.0, 1.0]]
+    result, diagnostics = principal_log_with_residual(matrix)
+
+    assert(result.all?(&:real?))
+    assert_in_delta(0.0, result[0, 0], 1e-14)
+    assert_in_delta(1e-10, result[0, 1], 1e-22)
+    assert_in_delta(0.0, result[1, 0], 1e-22)
+    assert_in_delta(0.0, result[1, 1], 1e-14)
+    assert_operator(diagnostics[:relative_residual], :<=, 1e-14)
+    assert_equal(0, diagnostics[:square_roots])
+  end
+
+  def test_principal_log_jordan_away_from_identity
+    matrix = Matrix[[2.0, 1.0], [0.0, 2.0]]
+    result, diagnostics = principal_log_with_residual(matrix)
+
+    assert_in_delta(Math.log(2), result[0, 0], 1e-14)
+    assert_in_delta(0.5, result[0, 1], 1e-14)
+    assert_in_delta(0.0, result[1, 0], 1e-14)
+    assert_in_delta(Math.log(2), result[1, 1], 1e-14)
+    assert_operator(diagnostics[:relative_residual], :<=, 1e-12)
+  end
+
+  def test_principal_log_strongly_nonnormal_positive_spectrum
+    similarity = Matrix[[10.0, 1.0], [1.0, 1.0]]
+    matrix = similarity * Matrix[[1.0, 0.0], [0.0, 2.0]] * similarity.inverse
+    result, diagnostics = principal_log_with_residual(matrix)
+    expected = similarity * Matrix[[0.0, 0.0], [0.0, Math.log(2)]] * similarity.inverse
+
+    result.each_with_index do |value, row, column|
+      assert_in_delta(expected[row, column], value, 1e-12)
+    end
+    assert_operator(diagnostics[:relative_residual], :<=, 1e-12)
+  end
+
+  def test_principal_log_strongly_nonnormal_complex_spectrum
+    matrix = Matrix[[1.0, 1000.0], [-1.0, 1.0]]
+    result, diagnostics = principal_log_with_residual(matrix, 1e-11)
+
+    assert(result.all?(&:real?))
+    assert_in_delta(Math.log(1001) / 2, result[0, 0], 1e-10)
+    assert_in_delta(result[0, 0], result[1, 1], 1e-14)
+    assert_in_delta(-1000 * result[1, 0], result[0, 1], 1e-10)
+    assert_operator(diagnostics[:relative_residual], :<=, 1e-11)
+  end
+
+  def test_principal_log_quasi_triangular_mixed_blocks
+    matrix = Matrix[
+      [2.0, 1.0, 0.5, 0.2],
+      [0.0, 3.0, 0.7, 0.4],
+      [0.0, 0.0, 2.0, 0.3],
+      [0.0, 0.0, 0.0, 5.0]
+    ]
+    result, diagnostics = principal_log_with_residual(matrix)
+
+    assert_in_delta(Math.log(2), result[0, 0], 1e-12)
+    assert_in_delta(Math.log(3), result[1, 1], 1e-12)
+    assert_in_delta(Math.log(3.0 / 2.0), result[0, 1], 1e-12)
+    assert_operator(diagnostics[:relative_residual], :<=, 1e-12)
+  end
+
+  def test_principal_log_complex_spectrum_is_real
+    matrix = Matrix[[0.0, -1.0], [1.0, 0.0]]
+    result, diagnostics = principal_log_with_residual(matrix)
+
+    assert(result.all?(&:real?))
+    assert_in_delta(0.0, result[0, 0], 1e-14)
+    assert_in_delta(-Math::PI / 2, result[0, 1], 1e-14)
+    assert_in_delta(Math::PI / 2, result[1, 0], 1e-14)
+    assert_in_delta(0.0, result[1, 1], 1e-14)
+    assert_operator(diagnostics[:relative_residual], :<=, 1e-12)
+  end
+
+  def test_principal_log_allows_complex_spectrum_near_negative_axis
+    angle = Math::PI - 1e-8
+    scale = 0.75
+    matrix = Matrix[
+      [scale * Math.cos(angle), -scale * Math.sin(angle)],
+      [scale * Math.sin(angle),  scale * Math.cos(angle)]
+    ]
+    result, diagnostics = principal_log_with_residual(matrix, 1e-11)
+
+    assert(result.all?(&:real?))
+    assert_in_delta(Math.log(scale), result[0, 0], 1e-10)
+    assert_in_delta(-angle, result[0, 1], 1e-10)
+    assert_in_delta(angle, result[1, 0], 1e-10)
+    assert_in_delta(Math.log(scale), result[1, 1], 1e-10)
+    assert_operator(diagnostics[:relative_residual], :<=, 1e-11)
+  end
+
+  def test_principal_log_rejects_invalid_spectrum_and_arguments
+    assert_raise(Matrix::ErrDimensionMismatch) { @m1.principal_log }
+    assert_raise(ArgumentError) { Matrix[[0.0, 1.0], [1.0, 0.0]].principal_log }
+    assert_raise(ArgumentError) { Matrix[[-1.0, 0.0], [0.0, 1.0]].principal_log }
+    assert_raise(ArgumentError) { Matrix[[1.0, 0.0], [0.0, 1.0]].principal_log(precision: 1.0) }
+    assert_raise(ArgumentError) { Matrix[[1.0, 0.0], [0.0, 1.0]].principal_log(precision: Float::EPSILON / 2) }
+    assert_raise(TypeError) { Matrix[[Complex(1, 1), 0.0], [0.0, 1.0]].principal_log }
+  end
+
+  private def principal_log_with_residual(matrix, precision = 1e-12)
+    diagnostics = matrix.principal_log(precision: precision, diagnostics: true)
+    [diagnostics.fetch(:matrix), diagnostics]
+  end
+
   def test_unitary?
     assert_equal true, @rot.unitary?
     assert_equal true, ((0+1i) * @rot).unitary?

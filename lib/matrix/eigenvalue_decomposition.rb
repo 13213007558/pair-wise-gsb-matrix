@@ -30,6 +30,8 @@ class Matrix
         @v = a.to_a
         tridiagonalize
         diagonalize
+        @schur = Array.new(@size) {|i| Array.new(@size, 0.0).tap {|row| row[i] = @d[i] } }
+        @schur_vectors = @v.map(&:dup)
       else
         @v = Array.new(@size) { Array.new(@size, 0) }
         @h = a.to_a
@@ -75,6 +77,20 @@ class Matrix
       Matrix.diagonal(*eigenvalues)
     end
     alias_method :d, :eigenvalue_matrix
+
+    # Returns the real Schur matrix +S+
+    #
+    def schur_matrix
+      Matrix.send(:new, @schur.map(&:dup))
+    end
+    alias_method :s, :schur_matrix
+
+    # Returns the orthogonal matrix +Q+ such that A = Q*S*Q.transpose
+    #
+    def schur_vectors
+      Matrix.send(:new, @schur_vectors.map(&:dup))
+    end
+    alias_method :q, :schur_vectors
 
     # Returns [eigenvector_matrix, eigenvalue_matrix, eigenvector_matrix_inv]
     #
@@ -721,6 +737,9 @@ class Matrix
           end  # k loop
         end  # check convergence
       end  # while (n >= low)
+
+      @schur = @h.map(&:dup)
+      @schur_vectors = @v.map(&:dup)
 
       # Backsubstitute to find vectors of upper triangular form
 
