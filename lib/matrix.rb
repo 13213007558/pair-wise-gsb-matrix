@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :DiscreteAlgebraicRiccatiEquation, "matrix/discrete_algebraic_riccati_equation"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1569,19 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Solves the discrete algebraic Riccati equation
+  #
+  #   X = A'XA - A'XB(R+B'XB)^{-1}B'XA + Q
+  #
+  # and returns the stabilizing feedback gain K such that A-BK is
+  # asymptotically stable. The returned object also contains numerical
+  # diagnostics; check +success?+ before using X or K.
+  #
+  def Matrix.solve_discrete_are(a, b, q, r)
+    DiscreteAlgebraicRiccatiEquation.solve(a, b, q, r)
+  end
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
