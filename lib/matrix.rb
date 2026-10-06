@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :CosineSineDecomposition, "matrix/cosine_sine_decomposition"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1569,29 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the cosine-sine decomposition for a real orthogonal matrix
+  # partitioned after +row_count+ rows and +column_count+ columns; see
+  # +CosineSineDecomposition+.
+  #
+  # If +q+ is an orthogonal 5x5 matrix, then
+  #
+  #   u, v, theta = q.cosine_sine_decomposition(2, 3)
+  #
+  # partitions +q+ into blocks of sizes 2x3, 2x2, 3x3, and 3x2. The
+  # last two blocks overlap with the two identity completion columns, so
+  # their displayed rectangular zero and identity entries remain present:
+  #
+  #   q == u * theta * v.transpose
+  #
+  # Optional keyword argument +tolerance+ sets the tolerance used while
+  # checking that the receiver is orthogonal.
+  #
+  def cosine_sine_decomposition(row_count, column_count, tolerance: nil)
+    CosineSineDecomposition.new(self, row_count, column_count, tolerance: tolerance)
+  end
+  alias_method :csd, :cosine_sine_decomposition
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
