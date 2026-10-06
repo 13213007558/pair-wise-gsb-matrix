@@ -2,6 +2,14 @@
 
 List of new feature changes (excluding most bug fixes and optimizations)
 
+## Unreleased
+
+* Add `Matrix.solve_discrete_are` solving the discrete-time algebraic
+  Riccati equation via the structure-preserving doubling algorithm, returning
+  the stabilizing solution, the optimal feedback gain and trustworthiness
+  diagnostics (residual, closed-loop spectrum, subspace separation) with
+  explicit failure reasons.
+
 ## v0.4.0
 
 * Add `Matrix#rotate_entries` [#19]
