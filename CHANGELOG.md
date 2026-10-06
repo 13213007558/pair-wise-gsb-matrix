@@ -2,6 +2,10 @@
 
 List of new feature changes (excluding most bug fixes and optimizations)
 
+## Unreleased
+
+* Add `Matrix#cs_decomposition` (cosine-sine decomposition of a real orthogonal matrix)
+
 ## v0.4.0
 
 * Add `Matrix#rotate_entries` [#19]

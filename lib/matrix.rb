@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :CSDecomposition, "matrix/cs_decomposition"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1569,21 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the cosine-sine decomposition of the matrix, partitioned after
+  # row +p+ and column +q+; see +CSDecomposition+.
+  # The matrix must be real and orthogonal.
+  #   q = Matrix[[0, -1, 0], [1, 0, 0], [0, 0, -1]]
+  #   csd = q.cs_decomposition(1, 1)
+  #   csd.theta                    # => Vector[1.5707963267948966]
+  #   u, cs, v = csd
+  #   (u * cs * v.t).round(5) == q # => true
+  #
+  def cs_decomposition(p, q)
+    CSDecomposition.new(self, p, q)
+  end
+  alias_method :cos_sin_decomposition, :cs_decomposition
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
