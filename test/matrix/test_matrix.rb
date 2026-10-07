@@ -488,6 +488,70 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal((v * d * v_inv).round(5), m)
   end
 
+  def test_williamson_decomposition
+    j = Matrix.J(1)
+    s = Matrix[[2.0, 1.0], [1.0, 1.0]]
+    d = Matrix.diagonal(3.0, 3.0)
+    a = s * d * s.transpose
+
+    w = a.williamson
+    reconstructed, eigenvalue_diagonal, s_transpose = w
+    assert_in_delta_array([3.0], w.symplectic_eigenvalues, 1e-13)
+    assert_in_delta(0, relative_matrix_residual(reconstructed.transpose, s_transpose), Float::EPSILON)
+    assert_equal(eigenvalue_diagonal, w.symplectic_eigenvalue_matrix)
+    assert_equal(j, w.canonical_symplectic_matrix)
+    assert_in_delta(0, relative_matrix_residual(a, reconstructed * eigenvalue_diagonal * s_transpose), 1e-14)
+    assert_in_delta(0, relative_matrix_residual(j, reconstructed.transpose * j * reconstructed), 1e-14)
+  end
+
+  def test_williamson_decomposition_repeated_and_mixed_eigenvalues
+    repeated = williamson_input(2, [3.0, 3.0], symplectic_shear)
+    w = repeated.williamson
+    assert_in_delta_array([3.0, 3.0], w.symplectic_eigenvalues, 1e-13)
+    assert_williamson_identities(repeated, 2, w, 1e-14)
+
+    mixed_s = Matrix.vstack(
+      Matrix.hstack(Matrix[[2.0, 1.0], [1.0, 1.0]], Matrix.zero(2)),
+      Matrix.hstack(Matrix.zero(2), Matrix[[2.0, 1.0], [1.0, 1.0]].inverse.transpose)
+    )
+    mixed_diagonal = Matrix.diagonal(2.0, 2.0, 7.0, 7.0)
+    mixed = mixed_s * mixed_diagonal * mixed_s.transpose
+    mixed_w = mixed.williamson
+    assert_in_delta_array([2.0, 7.0], mixed_w.symplectic_eigenvalues, 1e-13)
+    assert_williamson_identities(mixed, 2, mixed_w, 1e-14)
+
+    close_l = Matrix[[1.2, 0.1], [0.0, 1.0 / 1.2]]
+    close_s = Matrix.vstack(
+      Matrix.hstack(close_l, Matrix.zero(2)),
+      Matrix.hstack(Matrix.zero(2), close_l.inverse.transpose)
+    )
+    close = close_s * Matrix.diagonal(1.0, 1.0, 1.0 + 1e-10, 1.0 + 1e-10) * close_s.transpose
+    close_w = close.williamson
+    assert_in_delta_array([1.0, 1.0 + 1e-10], close_w.symplectic_eigenvalues, 1e-10)
+    assert_williamson_identities(close, 2, close_w, 1e-14)
+  end
+
+  def test_williamson_decomposition_large_scale_range
+    s = Matrix.vstack(
+      Matrix.hstack(Matrix[[2.0, 1.0], [1.0, 1.0]], Matrix.zero(2)),
+      Matrix.hstack(Matrix.zero(2), Matrix[[2.0, 1.0], [1.0, 1.0]].inverse.transpose)
+    )
+    large_diagonal = Matrix.diagonal(1e6, 1e6, 1e-6, 1e-6)
+    a = s * large_diagonal * s.transpose
+    w = a.williamson
+    assert_in_delta_array([1e-6, 1e6], w.symplectic_eigenvalues, 1e-8)
+    assert_williamson_identities(a, 2, w, 1e-13)
+  end
+
+  def test_williamson_decomposition_input_diagnostics
+    assert_raise(ExceptionForMatrix::ErrNotSymmetric) { Matrix[[1.0, 2.0], [3.0, 4.0]].williamson }
+    assert_raise(ExceptionForMatrix::ErrNotPositiveDefinite) { Matrix[[1.0, 2.0], [2.0, -1.0]].williamson }
+    assert_raise(ExceptionForMatrix::ErrNotPositiveDefinite) { Matrix.zero(2).williamson }
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { Matrix[[1, 2, 3], [4, 5, 6], [7, 8, 9]].williamson }
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { Matrix[[1, 2], [3, 4], [5, 6]].williamson }
+    assert_raise(TypeError) { Matrix[[Complex(1, 0), 0], [0, 1]].williamson }
+  end
+
   def test_imaginary
     assert_equal(Matrix[[2, 1, 0], [0, 0, 0]], @c1.imaginary)
   end
@@ -888,5 +952,43 @@ class TestMatrix < Test::Unit::TestCase
                  @m1.rotate_entries(-4))
     assert_equal(@m1.rotate_entries(-1),
                  @m1.rotate_entries(-5))
+  end
+
+  private
+
+  def assert_in_delta_array(expected, actual, delta)
+    expected.zip(actual) do |expected_value, actual_value|
+      assert_in_delta(expected_value, actual_value, delta)
+    end
+  end
+
+  def assert_williamson_identities(matrix, pair_count, decomposition, delta)
+    j = Matrix.J(pair_count)
+    s, d, s_transpose = decomposition
+    assert_in_delta(0, relative_matrix_residual(matrix, s * d * s_transpose), delta)
+    assert_in_delta(0, relative_matrix_residual(j, s.transpose * j * s), delta)
+  end
+
+  def relative_matrix_residual(expected, actual)
+    (expected - actual).each.to_a.map(&:abs).max / [1.0, expected.each.to_a.map(&:abs).max].max
+  end
+
+  def williamson_input(pair_count, symplectic_eigenvalues, grouped_transform)
+    grouped_diagonal = Matrix.diagonal(*symplectic_eigenvalues.flat_map { |value| [value, value] })
+    grouped_matrix = grouped_transform * grouped_diagonal * grouped_transform.transpose
+    grouped_coordinates = (0...pair_count).flat_map { |i| [i, pair_count + i] }
+    permutation_rows = grouped_coordinates.map do |coordinate|
+      Array.new(pair_count * 2) { |i| i == coordinate ? 1.0 : 0.0 }
+    end
+    permutation = Matrix.rows(permutation_rows)
+    permutation.transpose * grouped_matrix * permutation
+  end
+
+  def symplectic_shear
+    b = Matrix[[1.0, 0.3], [0.3, 0.2]]
+    Matrix.vstack(
+      Matrix.hstack(Matrix.identity(2), b),
+      Matrix.hstack(Matrix.zero(2), Matrix.identity(2))
+    )
   end
 end

@@ -50,6 +50,18 @@ module ExceptionForMatrix # :nodoc:
       super("Sorry, Operation(#{vals[0]}) not implemented: #{vals[1]} op #{vals[2]}")
     end
   end
+
+  class ErrNotSymmetric < StandardError
+    def initialize(val = "Matrix is not symmetric")
+      super(val)
+    end
+  end
+
+  class ErrNotPositiveDefinite < StandardError
+    def initialize(val = "Matrix is not positive definite")
+      super(val)
+    end
+  end
 end
 
 #
@@ -63,6 +75,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :WilliamsonDecomposition, "matrix/williamson_decomposition"
 
   # instance creations
   private_class_method :new
@@ -174,6 +187,28 @@ class Matrix
   class << Matrix
     alias_method :unit, :identity
     alias_method :I, :identity
+  end
+
+  #
+  # Creates the canonical 2*+pair_count+ real symplectic matrix for the
+  # coordinate ordering [q1, p1, q2, p2, ...].
+  #
+  def Matrix.symplectic_matrix(pair_count)
+    pair_count = CoercionHelper.coerce_to_int(pair_count)
+    raise ArgumentError, "expected a non-negative integer" if pair_count < 0
+    size = pair_count * 2
+    build(size) do |row, column|
+      if row.even? && column == row + 1
+        1
+      elsif row.odd? && column == row - 1
+        -1
+      else
+        0
+      end
+    end
+  end
+  class << Matrix
+    alias_method :J, :symplectic_matrix
   end
 
   #
@@ -1553,6 +1588,24 @@ class Matrix
     EigenvalueDecomposition.new(self)
   end
   alias_method :eigen, :eigensystem
+
+  #
+  # Returns the Williamson decomposition of a real symmetric positive
+  # definite matrix of even size; see +WilliamsonDecomposition+.
+  #
+  # Coordinates use the canonical pair ordering
+  # <tt>[q1, p1, q2, p2, ...]</tt>, with block-diagonal
+  # <tt>J = Matrix.J(n/2)</tt>. The result satisfies
+  # <tt>A = S * D * S.transpose</tt> and <tt>S.transpose * J * S = J</tt>.
+  #
+  # Symplectic eigenvalues are returned in nondecreasing order. A repeated
+  # value has a reproducibly constructed symplectic basis, but that basis is
+  # not unique.
+  #
+  def williamson_decomposition
+    WilliamsonDecomposition.new(self)
+  end
+  alias_method :williamson, :williamson_decomposition
 
   #
   # Returns the LUP decomposition of the matrix; see +LUPDecomposition+.

@@ -21,7 +21,16 @@ Gem::Specification.new do |spec|
 
   spec.metadata["changelog_uri"] = "#{spec.homepage}/releases"
 
-  spec.files         = ["COPYING", "BSDL", "lib/matrix.rb", "lib/matrix/eigenvalue_decomposition.rb", "lib/matrix/lup_decomposition.rb", "lib/matrix/version.rb", "matrix.gemspec"]
+  spec.files         = [
+    "COPYING",
+    "BSDL",
+    "lib/matrix.rb",
+    "lib/matrix/eigenvalue_decomposition.rb",
+    "lib/matrix/lup_decomposition.rb",
+    "lib/matrix/version.rb",
+    "lib/matrix/williamson_decomposition.rb",
+    "matrix.gemspec"
+  ]
   spec.bindir        = "exe"
   spec.executables   = []
   spec.require_paths = ["lib"]
