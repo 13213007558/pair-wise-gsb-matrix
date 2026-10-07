@@ -188,6 +188,126 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(42, Matrix[[7,0,1,0,12],[8,1,1,9,1],[4,0,0,-7,17],[-1,0,0,-4,8],[10,1,1,8,6]].determinant)
   end
 
+  def test_pfaffian
+    assert_equal(1, Matrix.empty(0, 0).pfaffian)
+    assert_equal(2, Matrix[[0, 2], [-2, 0]].pfaffian)
+    assert_equal(-3, Matrix[[0, -3], [3, 0]].pfaffian)
+    m = Matrix[[0, 1, 2, 3], [-1, 0, 4, 5], [-2, -4, 0, 6], [-3, -5, -6, 0]]
+    assert_equal(8, m.pfaffian)
+    assert_kind_of(Integer, m.pfaffian)
+  end
+
+  def test_pfaffian_exact_types
+    assert_equal(Rational(3, 2), Matrix[[0, Rational(3, 2)], [Rational(-3, 2), 0]].pfaffian)
+    assert_equal(Complex(1, 2), Matrix[[0, Complex(1, 2)], [Complex(-1, -2), 0]].pfaffian)
+    r = Matrix[[0, Rational(1, 2), Rational(-3, 4), 2],
+               [Rational(-1, 2), 0, Rational(5, 3), Rational(-1, 5)],
+               [Rational(3, 4), Rational(-5, 3), 0, Rational(7, 2)],
+               [-2, Rational(1, 5), Rational(-7, 2), 0]]
+    assert_equal(naive_pfaffian(r.to_a), r.pfaffian)
+    assert_equal(r.determinant, r.pfaffian**2)
+    c = Matrix[[0, Complex(1, 1), 2, Complex(0, 1)],
+               [Complex(-1, -1), 0, 3, Complex(1, -1)],
+               [-2, -3, 0, Complex(0, 2)],
+               [Complex(0, -1), Complex(-1, 1), Complex(0, -2), 0]]
+    assert_equal(Complex(-4, 7), c.pfaffian)
+    assert_equal(naive_pfaffian(c.to_a), c.pfaffian)
+    assert_equal(c.determinant, c.pfaffian**2)
+  end
+
+  def test_pfaffian_degenerate
+    assert_equal(0, Matrix.zero(2).pfaffian)
+    assert_equal(0, Matrix.zero(4).pfaffian)
+    # rank 2 antisymmetric matrix: all pivots vanish before the last step
+    assert_equal(0, Matrix[[0, 1, 2, 3], [-1, 0, 0, 0], [-2, 0, 0, 0], [-3, 0, 0, 0]].pfaffian)
+  end
+
+  def test_pfaffian_invalid_input
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { @m1.pfaffian }
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) {
+      Matrix[[0, 1, 2], [-1, 0, 3], [-2, -3, 0]].pfaffian
+    }
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { Matrix[[0, 1], [1, 0]].pfaffian }
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { Matrix[[1, 1], [-1, 0]].pfaffian }
+    assert_raise(ArgumentError) { Matrix[[0.0, 1.0], [-1.0, 0.0]].pfaffian(tolerance: -1e-8) }
+  end
+
+  def test_pfaffian_zero_pivot_exchange
+    # a[1][0] is zero, so a row/column exchange is needed to proceed
+    m = Matrix[[0, 0, 1, 2], [0, 0, 3, 4], [-1, -3, 0, 5], [-2, -4, -5, 0]]
+    assert_equal(2, m.pfaffian)
+    assert_equal(naive_pfaffian(m.to_a), m.pfaffian)
+  end
+
+  def test_pfaffian_against_definition
+    rng = Random.new(1234)
+    [4, 6].each do |n|
+      5.times do
+        a = Array.new(n) { Array.new(n, 0) }
+        n.times do |i|
+          (i + 1...n).each do |j|
+            a[i][j] = rng.rand(-9..9)
+            a[j][i] = -a[i][j]
+          end
+        end
+        m = Matrix.rows(a)
+        assert_equal(naive_pfaffian(a), m.pfaffian)
+        assert_equal(m.determinant, m.pfaffian**2)
+      end
+    end
+  end
+
+  def test_pfaffian_sign_flip_on_exchange
+    m = Matrix[[0, 1, 2, 3], [-1, 0, 4, 5], [-2, -4, 0, 6], [-3, -5, -6, 0]]
+    assert_equal(-m.pfaffian, exchange_rows_and_columns(m, 0, 3).pfaffian)
+    assert_equal(-m.pfaffian, exchange_rows_and_columns(m, 1, 2).pfaffian)
+  end
+
+  def test_pfaffian_float_tolerance
+    tiny = 1.0e-12
+    m = Matrix[[0.0, tiny], [-tiny, 0.0]]
+    assert_equal(tiny, m.pfaffian)
+    assert_equal(0, m.pfaffian(tolerance: 1.0e-8))
+    assert_equal(tiny, m.pfaffian(tolerance: 1.0e-16))
+    # near-zero pivots: largest-magnitude pivoting keeps the result accurate
+    eps = 1.0e-14
+    m = Matrix[[0.0, eps, 1.0, 2.0],
+               [-eps, 0.0, 3.0, 4.0],
+               [-1.0, -3.0, 0.0, 5.0],
+               [-2.0, -4.0, -5.0, 0.0]]
+    assert_in_delta(2.0, m.pfaffian(tolerance: 1.0e-10), 1.0e-9)
+  end
+
+  def test_pfaffian_does_not_modify_matrix
+    m = Matrix[[0, 1, 2, 3], [-1, 0, 4, 5], [-2, -4, 0, 6], [-3, -5, -6, 0]]
+    before = m.to_a
+    m.pfaffian
+    m.pfaffian(tolerance: 1.0e-9)
+    assert_equal(before, m.to_a)
+  end
+
+  # Pfaffian from its definition as the sum over all perfect matchings;
+  # used to cross-check Matrix#pfaffian on small matrices.
+  def naive_pfaffian(rows) # :nodoc:
+    n = rows.size
+    return 1 if n.zero?
+    total = 0
+    (1...n).each do |j|
+      rest = (1...n).to_a - [j]
+      minor = rest.map {|r| rest.map {|c| rows[r][c] } }
+      term = rows[0][j] * naive_pfaffian(minor)
+      total += j.odd? ? term : -term
+    end
+    total
+  end
+
+  def exchange_rows_and_columns(m, i, j) # :nodoc:
+    a = m.to_a
+    a[i], a[j] = a[j], a[i]
+    a.each {|row| row[i], row[j] = row[j], row[i] }
+    Matrix.rows(a)
+  end
+
   def test_new_matrix
     assert_raise(TypeError) { Matrix[Object.new] }
     o = Object.new

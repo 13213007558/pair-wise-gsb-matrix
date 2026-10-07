@@ -1403,6 +1403,92 @@ class Matrix
   alias_method :det_e, :determinant_e
 
   #
+  # Returns the Pfaffian of the matrix, which must be antisymmetric
+  # (skew-symmetric) and of even size.  The Pfaffian of an empty
+  # (0x0) matrix is defined as 1.
+  #
+  # The Pfaffian is a polynomial in the matrix entries whose square is
+  # the determinant: <code>m.pfaffian**2 == m.det</code>.  Unlike
+  # taking the square root of the determinant, it carries the correct
+  # sign, which makes it useful e.g. for small Fermi system
+  # calculations.
+  #
+  # The result is computed in O(n**3) operations by a Gaussian-type
+  # elimination that preserves the antisymmetric structure, instead of
+  # enumerating all perfect matchings.  Whenever a zero pivot is met,
+  # a row is exchanged together with its corresponding column (which
+  # flips the sign of the result), so the antisymmetry is kept intact.
+  #
+  # Matrices with exact elements (Integer, Rational, Complex with exact
+  # parts, ...) are handled with exact arithmetic; they are never
+  # converted to floats to decide whether a pivot is zero.  A matrix of
+  # Integers yields an Integer result.
+  #
+  # For matrices with inexact elements (e.g. Float), an explicit
+  # +tolerance+ can be given: the pivot of largest magnitude is then
+  # selected, candidates with magnitude <= +tolerance+ are treated as
+  # zero, and the Pfaffian of a numerically singular matrix is 0.
+  # Beware that without +tolerance+, Float values can yield erroneous
+  # results because of their lack of precision.
+  #
+  #   Matrix[[0, 2], [-2, 0]].pfaffian
+  #   #  => 2
+  #   Matrix[[0, 1, 2, 3], [-1, 0, 4, 5], [-2, -4, 0, 6], [-3, -5, -6, 0]].pfaffian
+  #   #  => 8
+  #
+  def pfaffian(tolerance: nil)
+    raise ErrDimensionMismatch unless square?
+    raise ErrDimensionMismatch, "Pfaffian is defined for even-sized matrices" if row_count.odd?
+    raise ErrDimensionMismatch, "Pfaffian is defined for antisymmetric matrices" unless antisymmetric?
+    raise ArgumentError, "tolerance must be non-negative" if tolerance && tolerance < 0
+
+    size = row_count
+    return 1 if size == 0
+
+    integer_elements = @rows.all? {|row| row.all? {|e| e.is_a?(Integer) } }
+    a = to_a
+    sign = +1
+    pf = 1
+    k = 0
+    while k < size - 1
+      if tolerance
+        pivot_row = (k + 1 ... size).max_by {|i| a[i][k].abs }
+        return 0 if a[pivot_row][k].abs <= tolerance
+      else
+        pivot_row = (k + 1 ... size).find {|i| a[i][k] != 0 }
+        return 0 unless pivot_row
+      end
+      if pivot_row != k + 1
+        # Exchange the row together with its corresponding column to
+        # preserve the antisymmetric structure; this flips the sign.
+        a[pivot_row], a[k + 1] = a[k + 1], a[pivot_row]
+        a.each {|row| row[pivot_row], row[k + 1] = row[k + 1], row[pivot_row] }
+        sign = -sign
+      end
+      pivot = a[k + 1][k]
+      pf *= -pivot # the (k, k+1) entry of the 2x2 pivot block
+      row_k = a[k]
+      row_k1 = a[k + 1]
+      (k + 2 ... size).each do |i|
+        ai = a[i]
+        # Eliminate columns k and k+1 of row i.  #quo keeps exact types
+        # exact (Integer/Rational/Complex) and floats as floats.
+        f1 = ai[k].quo(pivot)
+        f2 = ai[k + 1].quo(-pivot)
+        (k + 2 ... size).each do |j|
+          ai[j] = ai[j] - f1 * row_k1[j] - f2 * row_k[j]
+        end
+      end
+      k += 2
+    end
+    result = sign * pf
+    # The Pfaffian of an Integer matrix is an integer polynomial in the
+    # entries, so normalize Rational results with denominator 1.
+    result = result.to_i if integer_elements && result.is_a?(Rational) && result.denominator == 1
+    result
+  end
+
+  #
   # Returns a new matrix resulting by stacking horizontally
   # the receiver with the given matrices
   #
