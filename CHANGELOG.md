@@ -2,6 +2,14 @@
 
 List of new feature changes (excluding most bug fixes and optimizations)
 
+## Unreleased
+
+* Add `Matrix#williamson` / `Matrix::WilliamsonDecomposition`: Williamson
+  decomposition `V = S * D * S.transpose` of a symmetric positive-definite
+  matrix of even order into a symplectic matrix `S` (with
+  `S * J * S.transpose == J` for the standard symplectic form
+  `J = [[0, I], [-I, 0]]`) and its positive symplectic eigenvalues.
+
 ## v0.4.0
 
 * Add `Matrix#rotate_entries` [#19]

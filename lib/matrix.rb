@@ -63,6 +63,7 @@ class Matrix
   include ExceptionForMatrix
   autoload :EigenvalueDecomposition, "matrix/eigenvalue_decomposition"
   autoload :LUPDecomposition, "matrix/lup_decomposition"
+  autoload :WilliamsonDecomposition, "matrix/williamson_decomposition"
 
   # instance creations
   private_class_method :new
@@ -1568,6 +1569,21 @@ class Matrix
     LUPDecomposition.new(self)
   end
   alias_method :lup_decomposition, :lup
+
+  #
+  # Returns the Williamson decomposition of the matrix; see
+  # +WilliamsonDecomposition+.
+  #   v = Matrix[[2.0, 0.5], [0.5, 1.0]]
+  #   s, d = v.williamson
+  #   j = v.williamson.j
+  #   (s * d * s.t - v).map(&:abs).max < 1e-12 # => true
+  #   (s * j * s.t - j).map(&:abs).max < 1e-12     # => true
+  #
+  # The matrix must be symmetric positive-definite of even order.
+  def williamson
+    WilliamsonDecomposition.new(self)
+  end
+  alias_method :williamson_decomposition, :williamson
 
   #--
   # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
