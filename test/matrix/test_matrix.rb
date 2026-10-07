@@ -460,6 +460,110 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(Matrix.instance_method(:determinant), Matrix.instance_method(:det))
   end
 
+  def test_pfaffian_empty_and_basic
+    assert_equal(1, Matrix.empty.pfaffian)
+    assert_equal(2, Matrix[[0, 2], [-2, 0]].pfaffian)
+    assert_equal(-3, Matrix[[0, -3], [3, 0]].pfaffian)
+  end
+
+  def test_pfaffian_exact_types_and_definition
+    [
+      Matrix[[0, 1, 2, 3], [-1, 0, 4, 5], [-2, -4, 0, 6], [-3, -5, -6, 0]],
+      Matrix[[0, Rational(1, 2), Rational(2, 3), Rational(3, 4)],
+             [Rational(-1, 2), 0, Rational(4, 5), Rational(5, 6)],
+             [Rational(-2, 3), Rational(-4, 5), 0, Rational(6, 7)],
+             [Rational(-3, 4), Rational(-5, 6), Rational(-6, 7), 0]],
+      Matrix[[0, Complex(1, 2), Complex(2, -3), Complex(3, 4)],
+             [Complex(-1, -2), 0, Complex(4, -5), Complex(5, 6)],
+             [Complex(-2, 3), Complex(-4, 5), 0, Complex(6, -7)],
+             [Complex(-3, -4), Complex(-5, -6), Complex(-6, 7), 0]]
+    ].each do |matrix|
+      assert_equal(pfaffian_by_definition(matrix), matrix.pfaffian)
+    end
+
+    [[2, 4], [6, Rational(1, 3)], [6, Complex(1, 2)]].each do |size, step|
+      matrix = skew_symmetric_matrix(size, step)
+      assert_equal(pfaffian_by_definition(matrix), matrix.pfaffian)
+      pfaffian = matrix.pfaffian
+      assert_equal(matrix.determinant, pfaffian * pfaffian)
+    end
+  end
+
+  def test_pfaffian_pivoting_and_sign
+    matrix = Matrix[[0, 0, 2, 3],
+                    [0, 0, 4, 5],
+                    [-2, -4, 0, 6],
+                    [-3, -5, -6, 0]]
+    assert_equal(2, matrix.pfaffian)
+
+    permutation = [2, 1, 0, 3]
+    swapped = Matrix.build(4) { |row, col| matrix[permutation[row], permutation[col]] }
+    assert_equal(-2, swapped.pfaffian)
+  end
+
+  def test_pfaffian_later_pivoting_and_singular
+    rows = Array.new(6) { Array.new(6, 0) }
+    [[0, 1, 7], [2, 4, 2], [3, 5, 3], [4, 5, 6]].each do |row, col, value|
+      rows[row][col] = value
+      rows[col][row] = -value
+    end
+    matrix = Matrix[*rows]
+    assert_equal(-42, matrix.pfaffian)
+
+    singular = Matrix[[0, 1, 2, 0], [-1, 0, 0, 0], [-2, 0, 0, 0], [0, 0, 0, 0]]
+    assert_equal(0, singular.pfaffian)
+    assert_equal(0, Matrix.zero(6).pfaffian)
+  end
+
+  def test_pfaffian_float_epsilon
+    tiny = Matrix[[0, 1e-12], [-1e-12, 0]]
+    assert_in_delta(1e-12, tiny.pfaffian, 1e-18)
+    assert_equal(0, tiny.pfaffian(1e-9))
+    assert_instance_of(Float, tiny.pfaffian(1e-9))
+
+    nearly_skew = Matrix[[1e-12, 2.0], [-2.0 + 1e-12, 0.0]]
+    assert_raise(ArgumentError) { nearly_skew.pfaffian }
+    assert_in_delta(2.0, nearly_skew.pfaffian(1e-9), 1e-12)
+
+    matrix = Matrix[[0, 1e-8, 2.0, 0.0],
+                    [-1e-8, 0, 3.0, 4.0],
+                    [-2.0, -3.0, 0, 5.0],
+                    [0.0, -4.0, -5.0, 0]]
+    assert_in_delta(matrix.pfaffian, matrix.pfaffian(1e-9), 1e-9)
+
+    large_pivot = Matrix[[0, 1e-12, 0.0, 2.0],
+                          [-1e-12, 0, 3.0, 0.0],
+                          [0.0, -3.0, 0, 1.0],
+                          [-2.0, 0.0, -1.0, 0]]
+    assert_in_delta(6.0, large_pivot.pfaffian(1e-9), 1e-9)
+
+    mixed = Matrix[[0, Complex(1.0, 0), Rational(1, 2), 0],
+                   [Complex(-1.0, 0), 0, 0, 0],
+                   [Rational(-1, 2), 0, 0, 1],
+                   [0, 0, -1, 0]]
+    assert_in_delta(1.0, mixed.pfaffian.real, 1e-12)
+  end
+
+  def test_pfaffian_validates_and_does_not_mutate
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { Matrix[[1, 2, 3]].pfaffian }
+    assert_raise(ExceptionForMatrix::ErrDimensionMismatch) { Matrix.zero(3).pfaffian }
+    assert_raise(ArgumentError) { Matrix[[0, 1], [1, 0]].pfaffian }
+    assert_raise(ArgumentError) { Matrix[[0, 2], [-2, 0]].pfaffian(-1) }
+    assert_equal(2, Matrix[[0, 2], [-2, 0]].pfaffian(epsilon: 1))
+    assert_equal(0, Matrix[[0, 2], [-2, 0]].pfaffian(epsilon: 2))
+    complex = Matrix[[0, Complex(1, 1)], [Complex(-1, -1), 0]]
+    assert_equal(0, complex.pfaffian(epsilon: Math.sqrt(2)))
+    assert_raise(ArgumentError) { Matrix[[0, 2], [-2, 0]].pfaffian(mode: :float) }
+
+    matrix = Matrix[[0, 0, 2, 3],
+                    [0, 0, 4, 5],
+                    [-2, -4, 0, 6],
+                    [-3, -5, -6, 0]]
+    snapshot = matrix.to_a
+    matrix.pfaffian
+    assert_equal(snapshot, matrix.to_a)
+  end
+
   def test_rank2
     assert_equal(2, Matrix[[7,6],[3,9]].rank)
     assert_equal(0, Matrix[[0,0],[0,0]].rank)
@@ -888,5 +992,32 @@ class TestMatrix < Test::Unit::TestCase
                  @m1.rotate_entries(-4))
     assert_equal(@m1.rotate_entries(-1),
                  @m1.rotate_entries(-5))
+  end
+
+  private
+
+  def skew_symmetric_matrix(size, step)
+    Matrix.build(size) do |row, col|
+      if row < col
+        step * (row * size + col + 1)
+      elsif row > col
+        -step * (col * size + row + 1)
+      else
+        0
+      end
+    end
+  end
+
+  def pfaffian_by_definition(matrix)
+    pfaffian_terms(matrix, (0...matrix.row_count).to_a, 1)
+  end
+
+  def pfaffian_terms(matrix, remaining, sign)
+    return sign if remaining.empty?
+    first, *rest = remaining
+    rest.each_with_index.inject(0) do |sum, (other, index)|
+      pair_sign = index.even? ? sign : -sign
+      sum + matrix[first, other] * pfaffian_terms(matrix, rest - [other], pair_sign)
+    end
   end
 end

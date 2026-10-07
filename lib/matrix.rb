@@ -1356,6 +1356,83 @@ class Matrix
   alias_method :det, :determinant
 
   #
+  # Returns the Pfaffian of an even-dimensional skew-symmetric matrix.
+  #
+  # Exact element types (Integer, Rational, and Complex with exact parts) are
+  # never converted to Float. For floating-point entries, +epsilon+ may be
+  # supplied to treat entries whose absolute value is not greater than it as
+  # zero. The default, +0+, uses exact comparisons.
+  #
+  # The empty matrix has Pfaffian 1 by definition.
+  #
+  #   Matrix[[0, 2], [-2, 0]].pfaffian # => 2
+  #
+  def pfaffian(epsilon = 0, **options)
+    epsilon = options.delete(:epsilon) if options.key?(:epsilon)
+    raise ArgumentError, "unknown keywords: #{options.keys.join(", ")}" unless options.empty?
+    raise ErrDimensionMismatch unless square?
+    raise ErrDimensionMismatch, "Pfaffian is only defined for square matrices of even order" unless row_count.even?
+    unless epsilon.is_a?(Numeric) && !epsilon.is_a?(Complex) && epsilon >= 0
+      raise ArgumentError, "epsilon must be a non-negative real number"
+    end
+
+    tolerance = epsilon > 0
+    raise ArgumentError, "Matrix is not skew-symmetric" unless pfaffian_skew_symmetric?(epsilon)
+
+    return 1 if row_count == 0
+
+    a = to_a
+    size = row_count
+    float_mode = a.any? { |row| row.any? { |entry| pfaffian_float_entry?(entry) } }
+    squared_epsilon = epsilon * epsilon
+    sign = 1
+    result = 1
+
+    0.step(size - 2, 2) do |k|
+      if float_mode
+        candidates = (k + 1 ... size).select { |row| a[k][row].abs2 > squared_epsilon }
+        return 0.0 if candidates.empty?
+        pivot_row = candidates.max_by { |row| a[k][row].abs2 }
+      elsif tolerance
+        pivot_row = (k + 1 ... size).find { |row| a[k][row].abs2 > squared_epsilon }
+        return 0 if pivot_row.nil?
+      else
+        pivot_row = (k + 1 ... size).find { |row| a[k][row] != 0 }
+        return 0 if pivot_row.nil?
+      end
+
+      if pivot_row != k + 1
+        a[k + 1], a[pivot_row] = a[pivot_row], a[k + 1]
+        a.each do |row|
+          row[k + 1], row[pivot_row] = row[pivot_row], row[k + 1]
+        end
+        sign = -sign
+      end
+
+      pivot = a[k][k + 1]
+      result *= pivot
+
+      (k + 2 ... size).each do |i|
+        (i + 1 ... size).each do |j|
+          numerator = a[k][i] * a[k + 1][j] - a[k + 1][i] * a[k][j]
+          a[i][j] -= if float_mode
+            pfaffian_float_divide(numerator, pivot)
+          else
+            numerator.quo(pivot)
+          end
+          a[j][i] = -a[i][j]
+        end
+        a[i][i] = 0 if float_mode
+        a[i][k] = a[i][k + 1] = 0
+        a[k][i] = a[k + 1][i] = 0
+      end
+      a[k][k] = a[k + 1][k + 1] = 0 if float_mode
+    end
+
+    pfaffian_exact_value(sign * result)
+  end
+
+  #
   # Private. Use Matrix#determinant
   #
   # Returns the determinant of the matrix, using
@@ -1401,6 +1478,48 @@ class Matrix
     determinant
   end
   alias_method :det_e, :determinant_e
+
+  private def pfaffian_float_entry?(entry)
+    case entry
+    when Float
+      true
+    when Complex
+      entry.real.is_a?(Float) || entry.imaginary.is_a?(Float)
+    else
+      false
+    end
+  end
+
+  private def pfaffian_float_divide(numerator, denominator)
+    if numerator.is_a?(Complex) || denominator.is_a?(Complex)
+      Complex(numerator).fdiv(denominator)
+    else
+      numerator.fdiv(denominator)
+    end
+  end
+
+  private def pfaffian_skew_symmetric?(epsilon)
+    squared_epsilon = epsilon * epsilon
+    each_with_index(:upper) do |entry, row, col|
+      if epsilon > 0
+        return false unless (entry + rows[col][row]).abs2 <= squared_epsilon
+      else
+        return false unless entry == -rows[col][row]
+      end
+    end
+    true
+  end
+
+  private def pfaffian_exact_value(value)
+    case value
+    when Rational
+      value.denominator == 1 ? value.numerator : value
+    when Complex
+      Complex(pfaffian_exact_value(value.real), pfaffian_exact_value(value.imaginary))
+    else
+      value
+    end
+  end
 
   #
   # Returns a new matrix resulting by stacking horizontally
